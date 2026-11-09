@@ -1,0 +1,158 @@
+<div class="row-left-stretch" id="main-container">
+    <div class="col-top-strech" id="side-bar">
+        <label class="sidebar-toggle-label" [class.active]="isDraggingEnabled()" title="Toggle Canvas Drag Locking Mode">
+            <input
+                type="checkbox"
+                [checked]="isDraggingEnabled()"
+                (change)="isDraggingEnabled.set($event.target.checked)"
+                style="display: none;"> <!-- Hide raw checkbox box -->
+            <i class="fa" [class.fa-lock]="!isDraggingEnabled()" [class.fa-unlock]="isDraggingEnabled()"></i>
+        </label>
+
+        <!-- TEST -->
+        @if(selectedItemState().selectedItem && isDraggingEnabled()) {
+            <div class="touch-dpad-container">
+                <div class="dpad-row">
+                    <button class="btn dpad-btn" (click)="moveSelectedItem('ArrowUp')" title="Move Up">
+                        <i class="fa fa-chevron-up"></i>
+                    </button>
+                </div>
+                <div class="dpad-row">
+                    <button class="btn dpad-btn" (click)="moveSelectedItem('ArrowLeft')" title="Move Left">
+                        <i class="fa fa-chevron-left"></i>
+                    </button>
+                    <button class="btn dpad-btn center-dot" disabled>
+                        <i class="fa fa-arrows"></i>
+                    </button>
+                    <button class="btn dpad-btn" (click)="moveSelectedItem('ArrowRight')" title="Move Right">
+                        <i class="fa fa-chevron-right"></i>
+                    </button>
+                </div>
+                <div class="dpad-row">
+                    <button class="btn dpad-btn" (click)="moveSelectedItem('ArrowDown')" title="Move Down">
+                        <i class="fa fa-chevron-down"></i>
+                    </button>
+                </div>
+            </div>
+        }
+        <!-- END TEST -->
+
+        <div class="sidebar-divider"></div>
+
+        <button class="btn"
+                (click)="onUsbReqDev()"
+                title="Request USB Device">
+            <i class="fa fa-usb"></i>
+        </button>
+        <button class="btn"
+                (click)="editThermostats()"
+                title="Edit Thermostats">
+            <i class="fa fa-thermometer-full"></i>
+        </button>
+        <button class="btn"
+                (click)="showLogs()"
+                title="Show System Logs">
+            <i class="fa fa-list-alt"></i>
+        </button>
+
+        <div class="sidebar-divider"></div>
+
+        <button class="btn param-btn"
+                [disabled]="!selectedItemState().selectedItem"
+                (click)="setName()"
+                title="Set Node Name">
+            <i class="fa fa-tag"></i>
+        </button>
+
+        <button class="btn param-btn"
+                [disabled]="!selectedItemState().selectedItem"
+                (click)="setStyles()"
+                title="Configure Node Styles">
+            <i class="fa fa-paint-brush"></i>
+        </button>
+
+        <button class="btn param-btn"
+                [disabled]="!selectedItemState().selectedItem || !selectedItemState().showCorr"
+                (click)="setCorr()"
+                title="Set Sensor Calibration Correction">
+            <i class="fa fa-sliders"></i>
+        </button>
+
+        <button class="btn param-btn"
+                [disabled]="!selectedItemState().selectedItem || !selectedItemState().showCtrl"
+                (click)="showSSR()"
+                title="Toggle Relay On/Off State">
+            <i class="fa fa-power-off"></i>
+        </button>
+
+        <button class="btn param-btn"
+                [disabled]="!selectedItemState().selectedItem || !selectedItemState().showGraph"
+                (click)="graph()"
+                title="View Analytics Graph Metrics">
+            <i class="fa fa-bar-chart"></i>
+        </button>
+
+        <button class="btn param-btn"
+                [disabled]="!selectedItemState().selectedItem || !selectedItemState().showBattery"
+                (click)="showBattery()"
+                title="Inspect Battery Power Status">
+            <i class="fa fa-battery-three-quarters"></i>
+        </button>
+
+        <button class="btn param-btn"
+                [disabled]="!selectedItemState().selectedItem"
+                (click)="showAbout()"
+                title="Device Info">
+            <i class="fa fa-info-circle"></i>
+        </button>
+
+        <button class="btn param-btn deselect-btn"
+                [disabled]="!selectedItemState().selectedItem"
+                (click)="clearSelection()"
+                title="Deselect Active Node Element">
+            <i class="fa fa-times-circle"></i>
+        </button>
+    </div>
+    <div id="plan-container" #containerRef (click)="clearSelection()">
+        <div id="floor-plan"
+             #floorPlanRef
+             resizeObserver
+             (resize)="onResize($event)"
+             [style.height.px]="imgDim().height"
+             [style.backgroundImage]="bkgImgUrl()"
+             style="background-attachment: scroll; background-repeat: no-repeat; background-size: contain; background-position: top left;"
+             /* (click)="$event.stopPropagation()" */
+             (click)="clearSelection()">
+            @for(keyVal of itemsList(); track keyVal.key){
+                <div #itemRef
+                    class="item"
+                    [class.item-draggable]="isDraggingEnabled()"
+                    [class.item-selected]="selectedItemState().selectedItem?.key === keyVal.key"
+                    [ngStyle]="keyVal.value | itemStyle"
+                    cdkDrag
+                    #dragRef="cdkDrag"
+                    [cdkDragDisabled]="!isDraggingEnabled()"
+                    [cdkDragFreeDragPosition]="(keyVal.value | itemPosition: imgDim())!"
+                    [cdkDragBoundary]="floorPlanRef"
+                    (cdkDragEnded)="onDragEnded($event, keyVal)"
+                    (cdkDragStarted)="onDragStarted($event, keyVal)"
+                    (mouseenter)="mouseEnterItem(keyVal)"
+                    (mouseleave)="mouseLeaveItem()"
+                    (click)="selectItemForEditing(keyVal); $event.stopPropagation()"
+                    (contextmenu)="disableRightClick($event)">
+                    {{keyVal.value.formatedVal}}
+                </div>
+            }
+        </div>
+    </div>
+</div>
+<div class="row-right footer">
+    @if(usb.valid_dev_flag() == false){
+        <div class="row-left" id="usbStatus">
+            {{usbStatus()}}
+        </div>
+    }
+    <div class="row-right" id="footStat">
+        {{footerStatus()}}
+    </div>
+</div>

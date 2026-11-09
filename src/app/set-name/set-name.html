@@ -1,0 +1,38 @@
+<div class="col-top-strech"
+     cdkDrag
+     cdkDragRootElement="#name-dlg"
+     cdkDragBoundary=".cdk-overlay-container">
+
+    <div class="row-right dlg-header">
+        <div class="row-left dlg-title" cdkDragHandle>
+            {{title()}}
+        </div>
+        <button (click)="close()">
+            <i class="fa fa-times"></i>
+        </button>
+    </div>
+
+    <div class="col-top-strech dlg-body">
+        <div class="row-left">
+            <label for="itemName">name:</label>
+            <input #itemName
+                    id="itemName"
+                    type="text"
+                    [formField]="nameForm.name"
+                    (keydown.enter)="itemName.blur()"
+                    [class.is-invalid]="nameForm.name().invalid()">
+
+        </div>
+        @if(nameForm.name().invalid()) {
+            @for(err of nameForm.name().errors(); track err.kind) {
+                <span class="error-msg row-right">{{ err.message }}</span>
+            }
+        }
+    </div>
+
+    <div class="row-right dlg-footer">
+        <button class="saveBtn" [disabled]="nameForm().invalid()" (click)="save()">
+            save
+        </button>
+    </div>
+</div>

@@ -1,0 +1,165 @@
+<div class="col-top-strech"
+     cdkDrag
+     cdkDragRootElement="#styles-dlg"
+     cdkDragBoundary=".cdk-overlay-container">
+
+    <!-- Dialog Header -->
+    <div class='row-right dlg-header'>
+        <div class="row-left dlg-title" cdkDragHandle>
+            {{dlg_title()}}
+        </div>
+        <button (click)="close()">
+            <i class="fa fa-times"></i>
+        </button>
+    </div>
+
+    <!-- Preview Area -->
+    <div class="row-center" id="testCont">
+        <div #testView>
+            {{test_text()}}
+        </div>
+    </div>
+
+    <!-- Dialog Body (Style Controls) -->
+    <div class="col-top-strech dlg-body">
+        <div class="row-left">
+            <label>font size:</label>
+            <input
+                #itemFontSize
+                id="itemFontSize"
+                type="number"
+                [formField]="styleForm.fontSize"
+                (keydown.enter)="itemFontSize.blur()"
+                [class.is-invalid]="styleForm.fontSize().invalid()">
+        </div>
+
+        <div class="row-left">
+            <label>text color:</label>
+            <input
+                #itemColor
+                id="itemColor"
+                type="color"
+                [formField]="styleForm.color">
+        </div>
+
+        <div class="row-left">
+            <label>background color:</label>
+            <input
+                #itemBackgroundColor
+                id="itemBackgroundColor"
+                type="color"
+                [formField]="styleForm.bgColor">
+        </div>
+
+        <div class="row-left">
+            <label>opacity:</label>
+            <input
+                #itemOpacity
+                id="itemOpacity"
+                type="range"
+                step="0.1"
+                [formField]="styleForm.bgOpacity">
+        </div>
+
+        <!-- Border Controls -->
+        <div class="col-top-strech cards-common">
+            <div class="row-left">border:</div>
+            <div class="row-left">
+                <label>color:</label>
+                <input
+                    #itemBorderColor
+                    id="itemBorderColor"
+                    type="color"
+                    [formField]="styleForm.borderColor">
+            </div>
+
+            <div class="row-left">
+                <label>width:</label>
+                <input
+                    #itemBorderWidth
+                    id="itemBorderWidth"
+                    type="number"
+                    [formField]="styleForm.borderWidth"
+                    (keydown.enter)="itemBorderWidth.blur()"
+                    [class.is-invalid]="styleForm.borderWidth().invalid()">
+            </div>
+
+            <div class="row-left">
+                <label>radius:</label>
+                <input
+                    #itemBorderRadius
+                    id="itemBorderRadius"
+                    type="number"
+                    [formField]="styleForm.borderRadius"
+                    (keydown.enter)="itemBorderRadius.blur()"
+                    [class.is-invalid]="styleForm.borderRadius().invalid()">
+            </div>
+
+            <div class="row-left">
+                <label>style:</label>
+                <select id="borderStyle" #borderStyle [formField]="styleForm.borderStyle">
+                    @for(style of borderStyles; track style) {
+                        <option value="{{style}}">{{style}}</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        <!-- Padding Controls -->
+        <div class="col-top-strech cards-common">
+            <div class="row-left">paddings:</div>
+
+            <div class="row-center">
+                <input
+                    #itemPaddingTop
+                    id="itemPaddingTop"
+                    type="number"
+                    [formField]="styleForm.paddingTop"
+                    (keydown.enter)="itemPaddingTop.blur()"
+                    [class.is-invalid]="styleForm.paddingTop().invalid()">
+            </div>
+
+            <div class="row-center">
+                <div class="col-center">
+                    <input
+                        #itemPaddingLeft
+                        id="itemPaddingLeft"
+                        type="number"
+                        [formField]="styleForm.paddingLeft"
+                        (keydown.enter)="itemPaddingLeft.blur()"
+                        [class.is-invalid]="styleForm.paddingLeft().invalid()">
+                </div>
+                <div class="col-center" id="padd-rect"></div>
+                <div class="col-center">
+                    <input
+                        #itemPaddingRight
+                        id="itemPaddingRight"
+                        type="number"
+                        [formField]="styleForm.paddingRight"
+                        (keydown.enter)="itemPaddingRight.blur()"
+                        [class.is-invalid]="styleForm.paddingRight().invalid()">
+                </div>
+            </div>
+
+            <div class="row-center">
+                <input
+                    #itemPaddingBottom
+                    id="itemPaddingBottom"
+                    type="number"
+                    [formField]="styleForm.paddingBottom"
+                    (keydown.enter)="itemPaddingBottom.blur()"
+                    [class.is-invalid]="styleForm.paddingBottom().invalid()">
+            </div>
+        </div>
+    </div>
+
+    <!-- Dialog Footer -->
+    <div class="row-right dlg-footer">
+        <div>
+            <button class="saveBtn" [disabled]="styleForm().invalid()" (click)="save()">
+                save
+            </button>
+        </div>
+    </div>
+
+</div>

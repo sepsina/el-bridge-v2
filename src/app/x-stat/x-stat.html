@@ -1,0 +1,92 @@
+<div class="col-top-strech"
+     cdkDrag cdkDragRootElement="#x-stat-dlg"
+     cdkDragBoundary=".cdk-overlay-container">
+
+    <div class='row-right-stretch dlg-header'>
+        <div class="row-left dlg-title" cdkDragHandle> x-stat </div>
+        <button (click)="close()">
+            <i class="fa fa-times"></i>
+        </button>
+    </div>
+
+    <div class="col-top-strech dlg-body">
+
+        <!-- CARD 1: THERMOSTAT METER CONTROL -->
+        <div class="col-top-strech cards-common">
+            <div class="row-center">
+                <label>t-meter:</label>
+                <select [formField]="statForm.statSelIdx">
+                    @for(stat of thermostats(); track stat.addr) {
+                        <option value="{{$index}}"> {{stat.name}} </option>
+                    }
+                </select>
+            </div>
+            <div class="row-right">
+                <label>set point:</label>
+                <input
+                    #setPoint
+                    id="setPoint"
+                    type="number"
+                    [formField]="statForm.setPoint"
+                    (keydown.enter)="setPoint.blur()"
+                    [class.is-invalid]="statForm.setPoint().invalid()">
+            </div>
+            <div class="col-top-strech part-desc">
+                @for(desc of thermostatDesc(); track desc.key){
+                    <div>
+                        <span class="desc-label">{{desc.key}}</span>
+                        <span class="desc-value">{{desc.value}}</span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- CARD 2: ASSIGNED/USED HARDWARE SW-RELAYS -->
+        <div class="col-top-strech cards-common">
+            <div class="row-center">
+                <label>used:</label>
+                <select [formField]="statForm.usedSelIdx">
+                    @for(on_off of on_off_used(); track on_off.addr) {
+                        <option value="{{$index}}"> {{on_off.name}} </option>
+                    }
+                </select>
+                <button (click)="delActuator()">
+                    <i class="fa fa-minus-circle"></i>
+                </button>
+            </div>
+            <div class="col-top-strech part-desc">
+                @for(desc of usedDesc(); track desc.key){
+                    <div>
+                        <span class="desc-label">{{desc.key}}</span>
+                        <span class="desc-value">{{desc.value}}</span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- CARD 3: AVAILABLE FREE SW-RELAYS -->
+        <div class="col-top-strech cards-common">
+            <div class="row-center">
+                <label>free:</label>
+                <select [formField]="statForm.freeSelIdx">
+                    @for(on_off of on_off_free(); track on_off.addr) {
+                        <option value="{{$index}}"> {{on_off.name}} </option>
+                    }
+                </select>
+                <button (click)="addActuator()">
+                    <i class="fa fa-plus-circle"></i>
+                </button>
+            </div>
+            <div class="col-top-strech part-desc">
+                @for(desc of freeDesc(); track desc.key){
+                    <div>
+                        <span class="desc-label">{{desc.key}}</span>
+                        <span class="desc-value">{{desc.value}}</span>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class='row-right dlg-footer'></div>
+</div>

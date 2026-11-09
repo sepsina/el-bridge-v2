@@ -1,0 +1,37 @@
+<div class="col-top-strech"
+      cdkDrag
+      cdkDragRootElement="#graph-dlg"
+      cdkDragBoundary=".cdk-overlay-container">
+
+    <!-- Header Layout Content -->
+    <div class="row-right-stretch dlg-header">
+        <div class="row-left dlg-title" cdkDragHandle>
+            {{ currentItem().name }}
+        </div>
+        <button type="button" (click)="close()"><i class="fa fa-times"></i></button>
+    </div>
+
+    <!-- Body Content Container -->
+    <div class="col-top-strech dlg-body">
+        <div class="col-top">
+            <canvas #canvas id="canvas"></canvas>
+        </div>
+        <div id="x-axe">
+            <div>{{ duration() }}</div>
+            <div>00:00:00</div>
+        </div>
+    </div>
+
+    <!-- Footer Actions Data Area -->
+    <div class="row-right dlg-footer">
+        <div class="col-center" id="selPoint">
+            <div>{{ graphForm.selValue().value() }}</div>
+            <div>{{ graphForm.selTime().value() }}</div>
+        </div>
+
+        <button type="button" [disabled]="graphForm.selIdx().value() < 0" (click)="delSelPoint()">
+            <i class="fa fa-trash-o"></i>
+        </button>
+    </div>
+</div>
+

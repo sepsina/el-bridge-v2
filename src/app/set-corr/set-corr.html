@@ -1,0 +1,56 @@
+<div class="col-top-strech"
+     cdkDrag
+     cdkDragRootElement="#corr-dlg"
+     cdkDragBoundary=".cdk-overlay-container">
+
+    <div class='row-right-stretch dlg-header'>
+        <div class="row-left dlg-title" cdkDragHandle>
+            {{title()}}
+        </div>
+        <button type="button" (click)="close()">
+            <i class="fa fa-times"></i>
+        </button>
+    </div>
+
+    <div class="col-top-strech dlg-body">
+        <div class="row-center">
+            <label for="unitSel">units:</label>
+            <select
+                #unitSel
+                id="unitSel"
+                [formField]="corrForm.unitIdx"
+                (change)="unitSelect($any($event.target).value)">
+            @for(unit of allUnits(); track unit.name; let i = $index) {
+                <option [value]="i">
+                    {{unit.name}}
+                </option>
+            }
+            </select>
+        </div>
+
+        <div class="row-left">
+            <label for="offsetInput">offset:</label>
+            <input #offset
+                    id="offsetInput"
+                    type="number"
+                    step="0.1"
+                    [formField]="corrForm.offset"
+                    (keydown.enter)="offset.blur()"
+                    [class.invalid-field]="corrForm.offset().touched() && corrForm.offset().invalid()">
+        </div>
+
+        @if (corrForm.offset().touched() && corrForm.offset().invalid()) {
+            <div class="error-container" style="color: crimson; font-size: 0.85rem; margin-left: 55px;">
+                @for (issue of corrForm.offset().errors(); track issue.kind) {
+                    <div><small>{{ issue.message }}</small></div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class='row-right dlg-footer'>
+        <button class="saveBtn" [disabled]="corrForm().invalid()" (click)="save()">
+            save
+        </button>
+    </div>
+</div>

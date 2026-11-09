@@ -1,0 +1,25 @@
+:host {
+    display: flex;
+    flex-direction: column;
+    min-width: 300px;
+    max-height: 80vh;
+    border-radius: 6px;
+    background-color: white;
+    overflow: hidden;
+}
+
+.dlg-body {
+    padding: 10px 16px;
+}
+
+.data-row-all {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+}
+
+.data-row-value {
+    flex: 1 0 auto;
+    padding-right: 15px;
+    border-bottom: solid 1px lightgray;
+}

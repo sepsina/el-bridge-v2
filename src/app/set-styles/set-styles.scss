@@ -1,0 +1,24 @@
+:host {
+    display: flex;
+    flex-direction: column; /* Added to stack header, body, and footer vertically */
+    max-height: 90vh;
+    border-radius: 6px;
+    background-color: white;
+}
+
+#testCont {
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    border-top: solid 1px lightgray;
+    border-bottom: solid 1px lightgray;
+}
+
+#padd-rect {
+    width: 4rem;
+    height: 3rem;
+    border: 1px solid gray;
+}
+
+
+

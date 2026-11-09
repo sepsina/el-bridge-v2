@@ -1,0 +1,8 @@
+:host {
+    display: flex;
+    flex-direction: column; /* Ensures proper vertical stacking */
+    max-height: 80%;
+    border-radius: 6px;
+    background-color: white;
+}
+

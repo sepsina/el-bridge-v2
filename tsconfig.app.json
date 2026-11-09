@@ -1,0 +1,14 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "module": "ES2022",
+        "moduleResolution": "bundler",
+        "noEmit": true,
+        "types": ["w3c-web-usb"],
+    },
+    "include": [
+        "src/main.ts",
+        "src/app/**/*.ts",
+        "src/global.d.ts"
+    ]
+}

@@ -1,0 +1,27 @@
+:host {
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    min-width: 300px;
+    border-radius: 6px;
+    background-color: white;
+    overflow: hidden; /* Keeps border-radius clipped nicely */
+}
+
+.part-desc {
+    display: flex;
+    flex-direction: column;
+    border: solid 1px #ccc;
+    border-radius: 6px;
+    min-height: 80px;
+    padding: 12px;
+    gap: 10px;
+}
+
+.desc-label {
+    color: gray;
+}
+
+.desc-value {
+    padding-left: 0.4rem;
+}

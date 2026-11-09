@@ -1,0 +1,29 @@
+{
+    "compileOnSave": false,
+    "$schema": "./schemas/tsconfig.schema.json",
+    "compilerOptions": {
+        "strict": true,
+        "sourceMap": true,
+        "noImplicitOverride": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "noImplicitReturns": true,
+        "noFallthroughCasesInSwitch": true,
+        "skipLibCheck": true,
+        "isolatedModules": true,
+        "experimentalDecorators": true,
+        "importHelpers": true,
+        "esModuleInterop": true,
+        "target": "ES2022",
+        "composite": true
+    },
+    "angularCompilerOptions": {
+        "enableI18nLegacyMessageIdFormat": false,
+        "strictInjectionParameters": true,
+        "strictInputAccessModifiers": true
+    },
+    "files": [],
+    "references": [
+         { "path": "./tsconfig.app.json" },
+         { "path": "./electron/tsconfig.electron.json" }
+    ]
+}

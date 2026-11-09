@@ -1,0 +1,16 @@
+{
+    "extends": "../tsconfig.json",
+    "compilerOptions": {
+        "outDir": "../dist/electron",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "types": ["node"]
+    },
+    "include": [
+        "main.ts",
+        "preload.ts",
+        "configUSB.ts",
+        "configUDP.ts",
+        "configStore.ts"
+    ]
+}

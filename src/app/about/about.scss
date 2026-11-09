@@ -1,0 +1,15 @@
+:host {
+    display: flex;
+    flex-direction: column;
+    min-width: 300px;
+    max-height: 80vh;
+    border-radius: 6px;
+    background-color: white;
+    overflow: hidden;
+}
+
+#recs {
+    display: flex;           /* FIXED: Required for 'gap' to work */
+    flex-direction: column;  /* Stacks recommendations vertically */
+    gap: 4px;
+}

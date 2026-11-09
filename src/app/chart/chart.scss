@@ -1,0 +1,31 @@
+:host {
+    display: flex;
+    flex-direction: column;
+    min-width: 60vw;
+    max-height: 90vh;
+    border-radius: 6px;
+    background-color: white;
+    overflow: hidden; /* Keeps border-radius nicely clipped */
+}
+
+.dlg-body {
+    padding: 20px 20px;
+}
+
+#selPoint {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    font-size: 0.8rem;
+    text-align: right;
+    gap: 2px;
+}
+
+#x-axe {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    user-select: none;
+    font-size: 15px;
+    color: gray;
+}

@@ -1,0 +1,39 @@
+<div class="col-top-strech"
+     cdkDrag
+     cdkDragRootElement="#get-usb-dlg"
+     cdkDragBoundary=".cdk-overlay-container">
+
+    <div class="row-right-stretch dlg-header">
+        <div class="row-left dlg-title" cdkDragHandle>get-usb</div>
+        <button type="button" (click)="close()" aria-label="Close dialog">
+            <i class="fa fa-times" aria-hidden="true"></i>
+        </button>
+    </div>
+
+    <div class="col-top-strech dlg-body">
+            <div class="row-center">
+                <label for="usbDeviceSelect">device:</label>
+                <select id="usbDeviceSelect" [formField]="usbForm.selectedDeviceIndex">
+                    @for (usb of usb_devs(); track usb.id; let i = $index) {
+                        <option [value]="i">{{ usb.name }}</option>
+                    }
+                </select>
+            </div>
+
+            <div class="col-top-strech part-desc">
+                @for (desc of usb_desc(); track desc.key) {
+                    <div>
+                        <span class="desc-label">{{ desc.key }}</span>
+                        <span class="desc-value">{{ desc.value }}</span>
+                    </div>
+                }
+            </div>
+    </div>
+
+    <div class="row-right dlg-footer">
+        <button class="saveBtn" (click)="select()">
+            select
+        </button>
+    </div>
+
+</div>

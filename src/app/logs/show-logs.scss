@@ -1,0 +1,30 @@
+:host {
+    display: flex;
+    flex-direction: column;
+    min-width: 50vw;
+    max-height: 80vh;
+    border-radius: 6px;
+    background-color: white;
+    overflow: hidden; /* Keeps border-radius nicely clipped */
+}
+
+.log-msg {
+    border-top: 1px solid lightblue;
+    padding: 6px;
+}
+
+.log-msg:last-child {
+    border-bottom: 1px solid lightblue;
+}
+
+.log-msg:hover {
+    background-color: lightgreen;
+}
+
+#logList {
+    display: flex;           /* FIXED: Required for 'gap' to work */
+    flex-direction: column;  /* Stacks log messages vertically */
+    max-height: 300px;
+    gap: 0px;
+    overflow: auto;
+}
