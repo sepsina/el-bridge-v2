@@ -768,86 +768,20 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         }, 200);
     }
 
-/***********************************************************************************************
-     * @fn          onKeyDown
-     * @brief       Move selected item with arrow keys
-     *
-    @HostListener('window:keydown', ['$event'])
-    onKeyDown(event: KeyboardEvent) {
-        const currentSelection = this.selectedItemState().selectedItem;
-
-        // Only run if an item is selected
-        if (!currentSelection) {
-            return;
-        }
-
-        const arrowKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-        if (!arrowKeys.includes(event.key)) {
-            return;
-        }
-
-        // Fetch the latest item reference from itemsList() using the key to prevent stale data
-        const latestKeyVal = this.itemsList().find(item => item.key === currentSelection.key);
-        if (!latestKeyVal) {
-            return;
-        }
-
-        event.preventDefault(); // Stop window / container from scrolling
-
-        // Shift + Arrow moves faster (1% steps), standard arrow moves finely (0.2% steps)
-        const step = event.shiftKey ? 0.01 : 0.002;
-        const pos = latestKeyVal.value.pos || { x: 0, y: 0 };
-
-        let newX = pos.x;
-        let newY = pos.y;
-
-        switch (event.key) {
-            case 'ArrowLeft':
-                newX = Math.max(0, pos.x - step);
-                break;
-            case 'ArrowRight':
-                newX = Math.min(1, pos.x + step);
-                break;
-            case 'ArrowUp':
-                newY = Math.max(0, pos.y - step);
-                break;
-            case 'ArrowDown':
-                newY = Math.min(1, pos.y + step);
-                break;
-        }
-
-        const newPos: gIF.nsPos_t = { x: newX, y: newY };
-
-        // Call storage service update
-        this.storage.setItemPos(newPos, latestKeyVal);
-
-        // Keep local selection state synchronized with the updated item reference
-        this.selectedItemState.update(state => ({
-            ...state,
-            selectedItem: {
-                ...latestKeyVal,
-                value: {
-                    ...latestKeyVal.value,
-                    pos: newPos
-                }
-            }
-        }));
-    }
-    */
-/***********************************************************************************************
+    /***********************************************************************************************
      * @fn          moveSelectedItem
      * @brief       Shared logic for moving the selected item via keyboard or touch buttons
      */
     moveSelectedItem(direction: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown', fast = false) {
+
         const currentSelection = this.selectedItemState().selectedItem;
 
-        // Stop if no item is selected OR if the canvas/dragging mode is locked
-        if (!currentSelection || !this.isDraggingEnabled()) {
+        if(!currentSelection || !this.isDraggingEnabled()) {
             return;
         }
 
         const latestKeyVal = this.itemsList().find(item => item.key === currentSelection.key);
-        if (!latestKeyVal) {
+        if(!latestKeyVal) {
             return;
         }
 
@@ -857,7 +791,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         let newX = pos.x;
         let newY = pos.y;
 
-        switch (direction) {
+        switch(direction) {
             case 'ArrowLeft':
                 newX = Math.max(0, pos.x - step);
                 break;
@@ -875,6 +809,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         const newPos: gIF.nsPos_t = { x: newX, y: newY };
         this.storage.setItemPos(newPos, latestKeyVal);
 
+        /*
         this.selectedItemState.update(state => ({
             ...state,
             selectedItem: {
@@ -885,6 +820,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
                 }
             }
         }));
+        */
     }
 
     /***********************************************************************************************
