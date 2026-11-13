@@ -65,16 +65,16 @@ export class EditStats implements AfterViewInit {
         max(schemaPath.setPoint, this.maxSetPoint);
     });
 
-    thermostatDesc = signal<gIF.descVal_t[]>([]);
+    xstatDesc = signal<gIF.descVal_t[]>([]);
     usedDesc = signal<gIF.descVal_t[]>([]);
     freeDesc = signal<gIF.descVal_t[]>([]);
 
-    thermostats = signal<gIF.thermostat_t[]>([]);
+    xstats = signal<gIF.xstat_t[]>([]);
     on_off_all: gIF.on_off_actuator_t[] = [];
     on_off_used = signal<gIF.on_off_actuator_t[]>([]);
     on_off_free = signal<gIF.on_off_actuator_t[]>([]);
 
-    selThermostat = {} as gIF.thermostat_t;
+    selXstat = {} as gIF.xstat_t;
     selUsed = {} as gIF.on_off_actuator_t;
     selFree = {} as gIF.on_off_actuator_t;
 
@@ -89,13 +89,13 @@ export class EditStats implements AfterViewInit {
         const formData = this.formDataModel();
 
         untracked(() => {
-            // A. React when Thermostat select changes
+            // A. React when Xstat select changes
             idx = parseInt(formData.statSelIdx);
-            const currentThermostat = this.thermostats()[idx];
-            if(currentThermostat && (currentThermostat !== this.selThermostat)) {
-                this.selThermostat = currentThermostat;
-                this.setThermostat(this.selThermostat);
-                this.setThermostatDesc(this.selThermostat);
+            const currentXstat = this.xstats()[idx];
+            if(currentXstat && (currentXstat !== this.selXstat)) {
+                this.selXstat = currentXstat;
+                this.setXstat(this.selXstat);
+                this.setXstatDesc(this.selXstat);
             }
 
             // B. React when Used Actuator select changes
@@ -120,13 +120,13 @@ export class EditStats implements AfterViewInit {
                          && formData.setPoint <= this.maxSetPoint
                          && this.validStat;
             if(isOK) {
-                this.selThermostat.setPoint = formData.setPoint;
-                this.storage.storeThermostat(this.selThermostat);
+                this.selXstat.setPoint = formData.setPoint;
+                this.storage.storeXstat(this.selXstat);
             }
             else if(this.validStat) {
                 this.formDataModel.update(s => ({
                     ...s,
-                    setPoint: this.selThermostat.setPoint
+                    setPoint: this.selXstat.setPoint
                 }));
             }
         });
@@ -143,26 +143,26 @@ export class EditStats implements AfterViewInit {
     ngAfterViewInit() {
 
         const netItems = Array.from(this.storage.itemMap().values());
-        const t_stats: gIF.thermostat_t[] = [];
+        const t_stats: gIF.xstat_t[] = [];
 
         for(const item of netItems) {
             if(item.group === gIF.eGroup_t.E_GROUP_TEMPERATURE) {
-                const key = this.storage.thermostatKey(item.addr, item.endPoint);
-                const nvThermostat = this.storage.nvThermostatsMap.get(key);
+                const key = this.storage.xstatKey(item.addr, item.endPoint);
+                const nvXstat = this.storage.nvXstatsMap.get(key);
 
-                const thermostat: gIF.thermostat_t = {
+                const xstat: gIF.xstat_t = {
                     name: item.name,
                     partNum: item.partNum,
                     addr: item.addr,
                     endPoint: item.endPoint,
-                    hysteresis: gConst.THERMOSTAT_HYSTERESIS,
-                    setPoint: nvThermostat ? nvThermostat.setPoint : 20.0,
-                    prevSetPoint: nvThermostat ? nvThermostat.prevSetPoint : 0,
-                    workPoint: nvThermostat ? nvThermostat.workPoint : 20.0,
-                    actuators: nvThermostat ? [...nvThermostat.actuators] : []
+                    hysteresis: gConst.XSTAT_HYSTERESIS,
+                    setPoint: nvXstat ? nvXstat.setPoint : 20.0,
+                    prevSetPoint: nvXstat ? nvXstat.prevSetPoint : 0,
+                    switchingThreshold: nvXstat ? nvXstat.switchingThreshold : 20.0,
+                    actuators: nvXstat ? [...nvXstat.actuators] : []
                 };
 
-                t_stats.push(thermostat);
+                t_stats.push(xstat);
 
                 // TEST: Add some dummy actuators if none are found in the storage
                 for(let i = 1; i < 4; i++) {
@@ -179,7 +179,7 @@ export class EditStats implements AfterViewInit {
             }
 
             if(item.group === gIF.eGroup_t.E_GROUP_ON_OFF) {
-                if(item.type === gIF.eType_t.E_TYPE_ACUATOR){
+                if(item.type === gIF.eType_t.E_TYPE_ACTUATOR){
                     const on_off_actuator: gIF.on_off_actuator_t = {
                         valid: true,
                         name: item.name,
@@ -192,38 +192,38 @@ export class EditStats implements AfterViewInit {
             }
         }
 
-        this.storage.delAllThermostat();
+        this.storage.delAllXstat();
 
         if(t_stats.length > 0) {
             this.validStat = true;
-            this.thermostats.set(t_stats);
+            this.xstats.set(t_stats);
             for(const stat of t_stats) {
-                this.storage.storeThermostat(stat);
+                this.storage.storeXstat(stat);
             }
         }
         else {
             this.validStat = false;
-            this.thermostats.set([gConst.invalidStat]);
+            this.xstats.set([gConst.invalidStat]);
             this.on_off_all = [];
         }
 
         this.formDataModel.update(state => ({
             ...state,
             statSelIdx: '0',
-            setPoint: this.thermostats()[0].setPoint,
+            setPoint: this.xstats()[0].setPoint,
         }));
     }
 
     /***********************************************************************************************
-     * fn          setThermostat
+     * fn          setXstat
      *
      */
-    setThermostat(thermostat: gIF.thermostat_t) {
+    setXstat(xstat: gIF.xstat_t) {
 
         const used_actuators: gIF.on_off_actuator_t[] = [];
 
         const targetedKeys = new Set(
-            thermostat.actuators.map(a => `${a.addr}_${a.endPoint}`)
+            xstat.actuators.map(a => `${a.addr}_${a.endPoint}`)
         );
         const free_actuators = this.on_off_all.filter(actuator => {
             const key = `${actuator.addr}_${actuator.endPoint}`;
@@ -245,20 +245,20 @@ export class EditStats implements AfterViewInit {
     }
 
     /***********************************************************************************************
-     * fn          setThermostatDesc
+     * fn          setXstatDesc
      *
      */
-    setThermostatDesc(thermostat: gIF.thermostat_t) {
+    setXstatDesc(xstat: gIF.xstat_t) {
 
         const desc_vals: gIF.descVal_t[] = [];
 
-        if(thermostat && this.validStat) {
-            desc_vals.push({ key: 'Part Num:', value: `${thermostat.partNum}` });
-            desc_vals.push({ key: 'Short Addr:', value: `${this.utils.hexWord(thermostat.addr)}` });
-            desc_vals.push({ key: 'Endpoint:', value: `${thermostat.endPoint}` });
+        if(xstat && this.validStat) {
+            desc_vals.push({ key: 'Part Num:', value: `${xstat.partNum}` });
+            desc_vals.push({ key: 'Short Addr:', value: `${this.utils.hexWord(xstat.addr)}` });
+            desc_vals.push({ key: 'Endpoint:', value: `${xstat.endPoint}` });
 
         }
-        this.thermostatDesc.set(desc_vals);
+        this.xstatDesc.set(desc_vals);
     }
 
     /***********************************************************************************************
@@ -304,13 +304,13 @@ export class EditStats implements AfterViewInit {
         if(!this.validStat || !this.selFree || !this.selFree.valid) {
             return;
         };
-        this.selThermostat.actuators.push({
+        this.selXstat.actuators.push({
             name: this.selFree.name,
             addr: this.selFree.addr,
             endPoint: this.selFree.endPoint
         });
-        this.storage.storeThermostat(this.selThermostat);
-        this.setThermostat(this.selThermostat);
+        this.storage.storeXstat(this.selXstat);
+        this.setXstat(this.selXstat);
     }
 
     /***********************************************************************************************
@@ -322,13 +322,13 @@ export class EditStats implements AfterViewInit {
         if(!this.validStat || !this.selUsed || !this.selUsed.valid) {
             return;
         };
-        const idx = this.selThermostat.actuators.findIndex(
+        const idx = this.selXstat.actuators.findIndex(
             act => act.addr === this.selUsed.addr && act.endPoint === this.selUsed.endPoint
         );
         if(idx > -1) {
-            this.selThermostat.actuators.splice(idx, 1);
-            this.storage.storeThermostat(this.selThermostat);
-            this.setThermostat(this.selThermostat);
+            this.selXstat.actuators.splice(idx, 1);
+            this.storage.storeXstat(this.selXstat);
+            this.setXstat(this.selXstat);
         }
     }
 
@@ -336,8 +336,8 @@ export class EditStats implements AfterViewInit {
      * fn          saveActuators
      *
      *
-    saveActuators(thermostat: gIF.thermostat_t, used: gIF.on_off_actuator_t[]) {
-        this.storage.storeThermostat(thermostat);
+    saveActuators(xstat: gIF.xstat_t, used: gIF.on_off_actuator_t[]) {
+        this.storage.storeXstat(xstat);
     }
     */
     /***********************************************************************************************

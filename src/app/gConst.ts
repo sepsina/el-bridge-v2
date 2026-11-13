@@ -1,4 +1,5 @@
 import * as gIF from './gIF';
+
 export const LE = true;
 export const BE = false;
 export const HEAD_LEN = 5;
@@ -72,7 +73,7 @@ export const HTU21D_005_T = 501;
 export const HTU21D_005_RH = 502;
 export const HTU21D_005_BAT = 503;
 
-export const ENS_015_BASE = 1500;
+export const ENS_015 = 1500;
 export const ENS_015_AQ = 1501;
 
 export const SHT40_018 = 1800;
@@ -111,6 +112,13 @@ export const SSR_009_RELAY = 901;
 
 export const ACTUATOR_010_BASE = 1000;
 export const ACUATOR_010_ON_OFF = 1001;
+
+// Defined at the top of your file (module scope)
+export const PART_NAMES: Record<number, string> = {
+    [SHT40_018]: 'SHT40',
+    [SSR_009]: 'SSR-009',
+    [PB_023]: 'PB-023',
+};
 
 //export const MAX_DST_BINDS = 4;
 //export const MAX_SRC_BINDS = 14;
@@ -175,7 +183,7 @@ export const SL_WR_BIND = 3;
 export const SL_ZCL_CMD = 4;
 export const SL_CLOSE_CMD = 5;
 
-export const THERMOSTAT_HYSTERESIS = 0.5;
+export const XSTAT_HYSTERESIS = 0.5;
 
 export const FREE_LIST_LEN = 12;
 export const USED_LIST_LEN = 6;
@@ -207,37 +215,13 @@ export const dumyScroll: gIF.scroll_t = {
     name: DUMMY_SCROLL,
     yPos: 0
 }
-/*
-export const invalidBind: gIF.bind_t = {
-    valid: false,
-    partNum: 0,
-    extAddr: 0,
-    name: '- - -',
-    clusterID: 0,
-    shortAddr: 0,
-    endPoint: 0
-};
-*/
-/*
-export const invalidHostedBind: gIF.hostedBind_t = {
-    timestamp: 0,
-    name: '- - -',
-    partNum: 0,
-    hostShortAddr: 0,
-    extAddr: 0,
-    srcShortAddr: 0,
-    srcEP: 0,
-    clusterID: 0,
-    dstExtAddr: 0,
-    dstEP: 0
-};
-*/
+
 export const invalidStat = {
     name: '- - -',
     partNum: 0,
     setPoint: 0,
     prevSetPoint: 0,
-    workPoint: 0,
+    switchingThreshold: 0,
     hysteresis: 0,
     addr: 0,
     endPoint: 0,

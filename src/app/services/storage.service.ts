@@ -1,29 +1,23 @@
 import { Service, signal } from '@angular/core';
-//import * as gConst from './gConst';
+
 import * as gIF from '../gIF';
-import * as gConst from '../gConst';
 
 const ITEM = 'item';
-const THERMOSTAT = 'thermostat';
+const XSTAT = 'xstat';
 
 @Service()
 export class StorageService {
 
-    /*
-    scrolls = signal<gIF.scroll_t[]>([
-        gConst.dumyScroll
-    ]);
-    */
-    itemMap = signal(new Map());
+    itemMap = signal(new Map<string, gIF.netItem_t>());
 
-    nvPropsMap = new Map();
+    nvPropsMap = new Map<string, gIF.nvProps_t>();
 
     chartData = signal<gIF.netItem_t[]>([]);
     tempEvent = signal({} as gIF.tempEvent_t);
     pbEvent = signal({} as gIF.pbEvent_t);
     battEvent = signal({} as gIF.battEvent_t);
 
-    nvThermostatsMap = new Map();
+    nvXstatsMap = new Map<string, gIF.xstat_t>();
 
     txBuf = new Uint8Array(1024);
     rwBuf = new gIF.rwBuf_t();
@@ -46,47 +40,59 @@ export class StorageService {
     async readAllKeys() {
 
         const itemKeys = await window.electronItemStore.getKeys();
-        for(const key of itemKeys) {
-            const val = await window.electronItemStore.get(key);
-            if(val) {
-                this.nvPropsMap.set(key, JSON.parse(val));
+        const itemLoads = itemKeys.map(async (key) => {
+            try {
+                const val = await window.electronItemStore.get(key);
+                if(val) {
+                    this.nvPropsMap.set(key, JSON.parse(val));
+                }
             }
-        }
+            catch (err) {
+                console.error(`readAllKeys: failed to load item key "${key}"`, err);
+            }
+        });
         const statKeys = await window.electronStatStore.getKeys();
-        for(const key of statKeys) {
-            const val = await window.electronStatStore.get(key);
-            if(val) {
-                this.nvThermostatsMap.set(key, JSON.parse(val));
+        const statLoads = statKeys.map(async (key) => {
+            try {
+                const val = await window.electronStatStore.get(key);
+                if(val) {
+                    this.nvXstatsMap.set(key, JSON.parse(val));
+                }
             }
-        };
+            catch (err) {
+                console.error(`readAllKeys: failed to load stat key "${key}"`, err);
+            }
+        });
+
+        await Promise.all([...itemLoads, ...statLoads]);
     }
 
     /***********************************************************************************************
      * fn          setItemName
      *
      */
-    setItemName(name: string, keyVal: gIF.keyVal_t) {
+    setItemName(newName: string, keyVal: gIF.keyVal_t) {
 
         const key = keyVal.key;
         const item = keyVal.value;
-        let nvProps = {} as gIF.nvProps_t;
 
-        nvProps.name = name;
-        nvProps.pos = item.pos;
-        nvProps.style = item.style;
-        nvProps.valCorr = item.valCorr;
+        const nvProps: gIF.nvProps_t = {
+            name: newName,
+            pos: item.pos,
+            style: item.style,
+            valCorr: item.valCorr,
+        };
 
         window.electronItemStore.set(key, JSON.stringify(nvProps));
-
         this.nvPropsMap.set(key, nvProps);
 
-        this.itemMap.update((map)=>{
+        this.itemMap.update((map) => {
             const newMap = new Map(map);
-            const mapItem = newMap.get(key);
+            const mapItem = map.get(key);
             if(mapItem) {
                 newMap.set(key, {
                     ...mapItem,
-                    name: name
+                    name: newName
                 });
             }
             return newMap;
@@ -97,27 +103,27 @@ export class StorageService {
      * fn          setItemStyle
      *
      */
-    setItemStyle(style: gIF.ngStyle_t, keyVal: gIF.keyVal_t) {
+    setItemStyle(newStyle: gIF.ngStyle_t, keyVal: gIF.keyVal_t) {
 
         const key = keyVal.key;
         const item = keyVal.value;
-        let nvProps = {} as gIF.nvProps_t;
 
-        nvProps.name = item.name;
-        nvProps.pos = item.pos;
-        nvProps.style = style;
-        nvProps.valCorr = item.valCorr;
-
+        const nvProps: gIF.nvProps_t = {
+            name: item.name,
+            pos: item.pos,
+            style: newStyle,
+            valCorr: item.valCorr
+        };
         window.electronItemStore.set(key, JSON.stringify(nvProps));
         this.nvPropsMap.set(key, nvProps);
 
-        this.itemMap.update((map)=>{
+        this.itemMap.update((map) => {
             const newMap = new Map(map);
-            const mapItem = newMap.get(key);
+            const mapItem = map.get(key);
             if(mapItem) {
                 newMap.set(key, {
                     ...mapItem,
-                    style: { ...style }
+                    style: newStyle
                 });
             }
             return newMap;
@@ -128,27 +134,28 @@ export class StorageService {
      * fn          setItemCorr
      *
      */
-    setItemCorr(valCorr: gIF.valCorr_t, keyVal: gIF.keyVal_t) {
+    setItemCorr(newCorr: gIF.valCorr_t, keyVal: gIF.keyVal_t) {
 
         const key = keyVal.key;
         const item = keyVal.value;
-        let nvProps = {} as gIF.nvProps_t;
 
-        nvProps.name = item.name;
-        nvProps.pos = item.pos;
-        nvProps.style = item.style;
-        nvProps.valCorr = valCorr;
+        const nvProps: gIF.nvProps_t = {
+            name: item.name,
+            pos: item.pos,
+            style: item.style,
+            valCorr: newCorr
+        };
 
         window.electronItemStore.set(key, JSON.stringify(nvProps));
         this.nvPropsMap.set(key, nvProps);
 
-        this.itemMap.update((map)=>{
+        this.itemMap.update((map) => {
             const newMap = new Map(map);
-            const mapItem = newMap.get(key);
+            const mapItem = map.get(key);
             if(mapItem) {
                 newMap.set(key, {
                     ...mapItem,
-                    valCorr: { ...valCorr }
+                    valCorr: newCorr
                 });
             }
             return newMap;
@@ -159,27 +166,28 @@ export class StorageService {
      * fn          setItemPos
      *
      */
-    setItemPos(pos: gIF.nsPos_t, keyVal: gIF.keyVal_t) {
+    setItemPos(newPos: gIF.nsPos_t, keyVal: gIF.keyVal_t) {
 
         const key = keyVal.key;
         const item = keyVal.value;
-        let nvProps = {} as gIF.nvProps_t;
 
-        nvProps.name = item.name;
-        nvProps.pos = pos;
-        nvProps.style = item.style;
-        nvProps.valCorr = item.valCorr;
+        const nvProps: gIF.nvProps_t = {
+            name: item.name,
+            pos: newPos,
+            style: item.style,
+            valCorr: item.valCorr
+        };
 
         window.electronItemStore.set(key, JSON.stringify(nvProps));
         this.nvPropsMap.set(key, nvProps);
 
-        this.itemMap.update((map)=>{
+        this.itemMap.update((map) => {
             const newMap = new Map(map);
-            const mapItem = newMap.get(key);
+            const mapItem = map.get(key);
             if(mapItem) {
                 newMap.set(key, {
                     ...mapItem,
-                    pos: { ...pos },
+                    pos: newPos,
                     drag: false
                 });
             }
@@ -196,7 +204,6 @@ export class StorageService {
         const key = this.itemKey(item);
 
         window.electronItemStore.delete(key);
-
         this.nvPropsMap.delete(key);
 
         this.itemMap.update((map)=>{
@@ -204,8 +211,6 @@ export class StorageService {
             newMap.delete(key);
             return newMap;
         });
-
-
     }
 
     /***********************************************************************************************
@@ -221,7 +226,7 @@ export class StorageService {
         this.rwBuf.write_uint8(params.endPoint);
         const len = this.rwBuf.wrIdx;
 
-        let key = Array.from(
+        const key = Array.from(
             this.txBuf.subarray(0, len),
             (byte) => byte.toString(16)
         );
@@ -230,71 +235,60 @@ export class StorageService {
     }
 
     /***********************************************************************************************
-     * fn          setScrolls
-     *
-     *
-    setScrolls(scrolls: gIF.scroll_t[]) {
-        localStorage.setItem('scrolls', JSON.stringify(scrolls));
-    }
-    */
-    /***********************************************************************************************
-     * fn          getScrolls
-     *
-     * brief
-     *
-     *
-    getScrolls(): string {
-        return (localStorage.getItem('scrolls') || '');
-    }
-    */
-    /***********************************************************************************************
-     * fn          thermostatKey
+     * fn          xstatKey
      *
      */
-    thermostatKey(addr: number, endPoint: number) {
+    xstatKey(addr: number, endPoint: number) {
 
         this.rwBuf.wrIdx = 0;
 
         this.rwBuf.write_uint8(addr);
         this.rwBuf.write_uint8(endPoint);
         const len = this.rwBuf.wrIdx;
-        let key: string[] = [];
-        for (let i = 0; i < len; i++) {
-            key[i] = this.txBuf[i].toString(16);
-        }
-        return `${THERMOSTAT}-${key.join('')}`;
+
+        const key = Array.from(
+            this.txBuf.subarray(0, len),
+            (byte) => byte.toString(16).padStart(2, '0')
+        );
+
+        return `${XSTAT}-${key.join('')}`;
     }
 
     /***********************************************************************************************
-     * fn          delThermostat
+     * fn          delXstat
      *
      */
-    delThermostat(thermostat: gIF.thermostat_t) {
+    delXstat(xstat: gIF.xstat_t) {
 
-        const key = this.thermostatKey(thermostat.addr, thermostat.endPoint);
+        const key = this.xstatKey(xstat.addr, xstat.endPoint);
+
         window.electronStatStore.delete(key);
+
         return key;
     }
 
     /***********************************************************************************************
-     * fn          delAllThermostat
+     * fn          delAllXstat
      *
      */
-    delAllThermostat() {
+    delAllXstat() {
 
         window.electronStatStore.clear();
-        this.nvThermostatsMap.clear();
+
+        this.nvXstatsMap.clear();
     }
 
     /***********************************************************************************************
-     * fn          storeThermostat
+     * fn          storeXstat
      *
      */
-    storeThermostat(thermostat: gIF.thermostat_t) {
+    storeXstat(xstat: gIF.xstat_t) {
 
-        const key = this.thermostatKey(thermostat.addr, thermostat.endPoint);
-        window.electronStatStore.set(key, JSON.stringify(thermostat));
-        this.nvThermostatsMap.set(key, thermostat);
+        const key = this.xstatKey(xstat.addr, xstat.endPoint);
+
+        window.electronStatStore.set(key, JSON.stringify(xstat));
+
+        this.nvXstatsMap.set(key, xstat);
     }
 
 }

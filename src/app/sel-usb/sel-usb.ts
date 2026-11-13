@@ -5,16 +5,12 @@ import {
     computed,
     inject
 } from '@angular/core';
+
 import { CommonModule } from '@angular/common';
 import { CdkDrag, CdkDragHandle } from '@angular/cdk/drag-drop';
 import { DialogRef, DIALOG_DATA } from '@angular/cdk/dialog';
-
-// Import the native Signal Forms package introduced in Angular 22
 import { form, FormField } from '@angular/forms/signals';
 
-//import { StorageService } from '../services/storage.service';
-//import { UtilsService } from '../services/utils.service';
-//import * as gConst from '../gConst';
 import * as gIF from '../gIF';
 
 interface usb_t {
@@ -25,7 +21,7 @@ interface usb_t {
     mfg: string;
 }
 
-const usb_dummy: usb_t = {
+const USB_DUMMY: usb_t = {
     id: '0',
     name: '---',
     pid: '----',
@@ -56,67 +52,57 @@ export class SelUSB implements OnInit {
 
     readonly hostID = 'get-usb-dlg';
 
-    // Services
-    //private readonly storage = inject(StorageService);
-    //private readonly utils = inject(UtilsService);
     private readonly dialogRef = inject(DialogRef<string | undefined>);
     private readonly dlgData = inject(DIALOG_DATA);
 
-    // List of loaded items tracked inside a plain signal
-    readonly usb_devs = signal<usb_t[]>([usb_dummy]);
+    readonly usbList = signal<usb_t[]>([USB_DUMMY]);
 
-    // 1. Define the base Form Data state using a standard writable signal
     private readonly formModel = signal<UsbFormModel>({
         selectedDeviceIndex: '0'
     });
 
-    // 2. Initialize the hierarchical FieldTree form tracking structure
     readonly usbForm = form(this.formModel);
 
-    // 3. Extract selections reactively using the derived form signal value
-    readonly sel_usb = computed<usb_t>(() => {
+    readonly selectedUsb = computed<usb_t>(() => {
         const index = parseInt(this.formModel().selectedDeviceIndex, 10);
-        const devs = this.usb_devs();
-        return devs[index] ?? usb_dummy;
+        const devs = this.usbList();
+        return devs[index] ?? USB_DUMMY;
     });
 
-    // 4. Descriptions automatically compute as form field states change
     readonly usb_desc = computed<gIF.descVal_t[]>(() => {
-        const currentUsb = this.sel_usb();
-        if (currentUsb.id === '0') {
+        const sel = this.selectedUsb();
+        if(sel.id === '0') {
             return [
-                { key: 'pid:', value: '0x----' },
-                { key: 'vid:', value: '0x----' },
-                { key: 'mfg:', value: '---' }
+                { key: 'pid:', value: '----' },
+                { key: 'vid:', value: '----' },
+                { key: 'mfg:', value: '----' }
             ];
         }
         return [
-            { key: 'pid:', value: `0x${currentUsb.pid}` },
-            { key: 'vid:', value: `0x${currentUsb.vid}` },
-            { key: 'mfg:', value: currentUsb.mfg }
+            { key: 'pid:', value: `0x${sel.pid}` },
+            { key: 'vid:', value: `0x${sel.vid}` },
+            { key: 'mfg:', value: sel.mfg }
         ];
     });
 
     ngOnInit(): void {
-        /*
-        if(!this.dlgData?.devices || !Array.isArray(this.dlgData.devices)) {
-            return;
-        }
-        */
-        const mappedDevices: usb_t[] = this.dlgData.devices.map((dev: any) => ({
+
+        const dlgList: Electron.USBDevice[] = this.dlgData.devices ?? [];
+
+        const devs: usb_t[] = dlgList.map((dev) => ({
             id: dev.deviceId,
             name: dev.productName || 'Unknown Device',
-            pid: (dev.productId ?? 0).toString(16).padStart(4, '0'),
-            vid: (dev.vendorId ?? 0).toString(16).padStart(4, '0'),
+            pid: dev.productId.toString(16).padStart(4, '0'),
+            vid: dev.vendorId.toString(16).padStart(4, '0'),
             mfg: dev.manufacturerName || '---'
         }));
 
-        this.usb_devs.set([usb_dummy, ...mappedDevices]);
+        this.usbList.set([USB_DUMMY, ...devs]);
         this.formModel.set({ selectedDeviceIndex: '0' });
     }
 
     select(): void {
-        const selectedId = this.sel_usb().id;
+        const selectedId = this.selectedUsb().id;
         this.dialogRef.close(selectedId === '0' ? undefined : selectedId);
     }
 

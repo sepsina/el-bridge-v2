@@ -11,12 +11,12 @@
 
     <div class="col-top-strech dlg-body">
 
-        <!-- CARD 1: THERMOSTAT METER CONTROL -->
+        <!-- CARD 1: XSTAT METER CONTROL -->
         <div class="col-top-strech cards-common">
             <div class="row-center">
                 <label>t-meter:</label>
                 <select [formField]="statForm.statSelIdx">
-                    @for(stat of thermostats(); track stat.addr) {
+                    @for(stat of xstats(); track stat.addr) {
                         <option value="{{$index}}"> {{stat.name}} </option>
                     }
                 </select>
@@ -32,7 +32,7 @@
                     [class.is-invalid]="statForm.setPoint().invalid()">
             </div>
             <div class="col-top-strech part-desc">
-                @for(desc of thermostatDesc(); track desc.key){
+                @for(desc of xstatDesc(); track desc.key){
                     <div>
                         <span class="desc-label">{{desc.key}}</span>
                         <span class="desc-value">{{desc.value}}</span>

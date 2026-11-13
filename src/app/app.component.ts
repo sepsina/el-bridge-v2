@@ -28,6 +28,7 @@ import * as gIF from './gIF';
 
 import { ItemStylePipe } from './pipes/item-style.pipe';
 import { ItemPositionPipe } from './pipes/item-position.pipe';
+import { map } from 'rxjs';
 
 @Component({
     selector: 'app-root',
@@ -81,7 +82,6 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         showBattery: false,
         showGraph: false
     });
-
 
     trash = 0;
 
@@ -237,18 +237,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
             this.imgWidth.set(divDim.width);
         };
         bkgImg.src = bkgImgPath;
-
-        /*
-        const scrolls = this.storage.getScrolls();
-        if(scrolls){
-            const nvScrolls = JSON.parse(this.storage.getScrolls());
-            if(nvScrolls){
-                this.storage.scrolls.set(nvScrolls);
-            }
-        }
-        */
     }
-
 
     /***********************************************************************************************
      * @fn          onDragEnded
@@ -278,7 +267,17 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      */
     onDragStarted(event: CdkDragStart, keyVal: gIF.keyVal_t) {
 
-        keyVal.value.drag = true;
+        this.storage.itemMap.update((map) => {
+            const newMap = new Map(map);
+            const mapItem = map.get(keyVal.key);
+            if(mapItem) {
+                newMap.set(keyVal.key, {
+                    ...mapItem,
+                    drag: true
+                });
+            }
+            return newMap;
+        });
     }
 
     /***********************************************************************************************
@@ -668,57 +667,53 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      */
     tempEvent(event: gIF.tempEvent_t){
 
-        const key = this.storage.thermostatKey(event.addr, event.endPoint);
-        const nvThermostat: gIF.thermostat_t = this.storage.nvThermostatsMap.get(key);
-        if(nvThermostat){
-            if(nvThermostat.actuators.length){
-                let changed = false;
-                if(nvThermostat.setPoint !== nvThermostat.prevSetPoint){
-                    changed = true;
-                    nvThermostat.prevSetPoint = nvThermostat.setPoint;
-                    nvThermostat.workPoint = nvThermostat.setPoint - nvThermostat.hysteresis;
-                }
-                if(event.temp > nvThermostat.workPoint){
-                    if(nvThermostat.workPoint > nvThermostat.setPoint){
-                        changed = true;
-                        nvThermostat.workPoint = nvThermostat.setPoint - nvThermostat.hysteresis;
-                    }
-                }
-                if(event.temp < nvThermostat.workPoint){
-                    if(nvThermostat.workPoint < nvThermostat.setPoint){
-                        changed = true;
-                        nvThermostat.workPoint = nvThermostat.setPoint + nvThermostat.hysteresis;
-                    }
-                }
-                if(changed){
-                    this.storage.storeThermostat(nvThermostat);
-                }
+        const key = this.storage.xstatKey(event.addr, event.endPoint);
+        const nvXstat = this.storage.nvXstatsMap.get(key);
 
-                let cmd = 0x00; // OFF
-                if(event.temp < nvThermostat.workPoint){
-                    cmd = 0x01; // ON
-                }
+        if (!nvXstat || !nvXstat.actuators.length) {
+            return;
+        }
 
-                for(const on_off of nvThermostat.actuators){
-                    /*
-                    const zclCmd = {} as gIF.udpZclReq_t;
-                    zclCmd.ip = '';  // not used
-                    zclCmd.port = 0; // not used
-                    zclCmd.addr = on_off.addr;
-                    zclCmd.endPoint = on_off.endPoint;
-                    zclCmd.clusterID = gConst.CLUSTER_ID_GEN_ON_OFF;
-                    zclCmd.hasRsp = 0;
-                    zclCmd.cmdLen = 3;
-                    zclCmd.cmd = [];
-                    zclCmd.cmd[0] = 0x11; // cluster spec cmd, not manu spec, client to srv dir, disable dflt rsp
-                    zclCmd.cmd[1] = 0x00; // seq num -> not used
-                    zclCmd.cmd[2] = cmd;  // ON/OFF command
+        let changed = false;
 
-                    this.storage.zclCmd.set(zclCmd);
-                    */
-                }
+        // Calculate hysteresis boundaries
+        const upperLimit = nvXstat.setPoint + nvXstat.hysteresis;
+        const lowerLimit = nvXstat.setPoint - nvXstat.hysteresis;
+
+        // Reset workPoint when setPoint changes
+        if(nvXstat.setPoint !== nvXstat.prevSetPoint) {
+            changed = true;
+            nvXstat.prevSetPoint = nvXstat.setPoint;
+            nvXstat.switchingThreshold = lowerLimit;
+        }
+
+        // Update workPoint only at hysteresis boundaries
+        if(event.temp >= upperLimit) {
+            if(nvXstat.switchingThreshold > nvXstat.setPoint){
+                changed = true;
+                nvXstat.switchingThreshold = lowerLimit;
             }
         }
+
+        if(event.temp <= lowerLimit) {
+            if(nvXstat.switchingThreshold < nvXstat.setPoint){
+                changed = true;
+                nvXstat.switchingThreshold = upperLimit;
+            }
+        }
+
+        if(changed) {
+            this.storage.storeXstat(nvXstat);
+        }
+
+        // Determine actuator command (ON: 0x01, OFF: 0x00)
+        const cmd = event.temp < nvXstat.switchingThreshold ? 0x01 : 0x00;
+
+        // Apply command to all actuators
+        for(const actuator of nvXstat.actuators) {
+            // Send cmd to actuator
+        }
+
     }
 
     /***********************************************************************************************
@@ -779,15 +774,28 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         if(!currentSelection || !this.isDraggingEnabled()) {
             return;
         }
-
         const latestKeyVal = this.itemsList().find(item => item.key === currentSelection.key);
         if(!latestKeyVal) {
             return;
         }
-
         const step = fast ? 0.01 : 0.002;
         const pos = latestKeyVal.value.pos || { x: 0, y: 0 };
 
+        const containerEl = this.floorPlanRef().nativeElement as HTMLElement;
+        const selectedEl = containerEl.querySelector('.item-selected') as HTMLElement;
+
+        let maxX = 1;
+        let maxY = 1;
+
+        if(containerEl && selectedEl) {
+            const containerRect = containerEl.getBoundingClientRect();
+            const selectedRect = selectedEl.getBoundingClientRect();
+
+            if(containerRect.width > 0 && containerRect.height > 0) {
+                maxX = Math.max(0, 1 - (selectedRect.width / containerRect.width));
+                maxY = Math.max(0, 1 - (selectedRect.height / containerRect.height));
+            }
+        }
         let newX = pos.x;
         let newY = pos.y;
 
@@ -796,31 +804,18 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
                 newX = Math.max(0, pos.x - step);
                 break;
             case 'ArrowRight':
-                newX = Math.min(1, pos.x + step);
+                newX = Math.min(maxX, pos.x + step);
                 break;
             case 'ArrowUp':
                 newY = Math.max(0, pos.y - step);
                 break;
             case 'ArrowDown':
-                newY = Math.min(1, pos.y + step);
+                newY = Math.min(maxY, pos.y + step);
                 break;
         }
-
         const newPos: gIF.nsPos_t = { x: newX, y: newY };
         this.storage.setItemPos(newPos, latestKeyVal);
 
-        /*
-        this.selectedItemState.update(state => ({
-            ...state,
-            selectedItem: {
-                ...latestKeyVal,
-                value: {
-                    ...latestKeyVal.value,
-                    pos: newPos
-                }
-            }
-        }));
-        */
     }
 
     /***********************************************************************************************

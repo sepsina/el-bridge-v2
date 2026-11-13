@@ -11,15 +11,11 @@ const vID = 0x1915;
 const options: USBDeviceRequestOptions = {
     filters: [{vendorId: vID/*, productId: pID*/}]
 };
-/*
-@Injectable({
-    providedIn: 'root',
-})
-*/
+
 @Service()
 export class UsbService {
 
-    usb_device = {} as USBDevice;
+    private usb_device?: USBDevice;
     valid_dev_flag = signal(false);
 
     rxBuf = new Uint8Array(1024);
@@ -27,12 +23,14 @@ export class UsbService {
     rwBuf = new gIF.rwBuf_t();
 
     outFrames: Uint8Array[] = [];
+
+    private isReading = false;
     usbReadTmo: any;
 
     storage = inject(StorageService);
     utils = inject(UtilsService);
 
-    trash = 1;
+    trash = 0;
 
     constructor() {
         setTimeout(() => {
@@ -44,7 +42,7 @@ export class UsbService {
         navigator.usb.ondisconnect = (event: USBConnectionEvent)=>{
             console.warn(event);
             this.storage.itemMap.update((map)=>{
-                for(let [key, val] of map) {
+                for(let [, val] of map) {
                     val.isValid = false;
                 }
                 return new Map(map);
@@ -80,24 +78,56 @@ export class UsbService {
     async requestDevice() {
 
         try {
-            let device = await navigator.usb.requestDevice({filters: [{vendorId: vID}]});
-            await device.open();
-            await device.selectConfiguration(1);
-            await device.claimInterface(0);
+            // 1. Clean up any existing stale timer before connecting a new device
+            if(this.usbReadTmo) {
+                clearTimeout(this.usbReadTmo);
+                this.usbReadTmo = undefined;
+            }
 
+            // 2. Request the device via WebUSB
+            const device = await navigator.usb.requestDevice({ filters: [{ vendorId: vID }] });
+
+            // 3. Ensure clean connection state
+            if(!device.opened) {
+                await device.open();
+            }
+
+            if(device.configuration === null) {
+                await device.selectConfiguration(1);
+            }
+
+            // Check if interface 0 is already claimed, claim if not
+            // (WebUSB doesn't have a direct 'isClaimed' property, so we handle it cleanly)
+            try {
+                await device.claimInterface(0);
+            }
+            catch(claimErr) {
+                console.warn('Interface 0 might already be claimed:', claimErr);
+            }
+
+            // 4. Assign device and update state signals
             this.usb_device = device;
             this.valid_dev_flag.set(true);
 
-            const msg = `device connected -> ${device.productName}`;
-            this.utils.sendMsg(msg, 'red');
+            const msg = `Device connected -> ${device.productName || 'Unknown Device'}`;
+            this.utils.sendMsg(msg, 'green'); // Changed to 'green' or success color
 
-            clearTimeout(this.usbReadTmo);
-            this.usbReadTmo = setTimeout(()=>{
+            // 5. Start the read loop
+            this.usbReadTmo = setTimeout(() => {
                 this.usbRead();
             }, 100);
+
         }
-        catch(err) {
-            console.error(err);
+        catch(err: any) {
+            if(err.name === 'NotFoundError') {
+                console.log('User cancelled the device selection prompt.');
+            }
+            else {
+                console.error('Failed to request/connect USB device:', err);
+                this.utils.sendMsg('Failed to connect USB device', 'red');
+            }
+
+            this.valid_dev_flag.set(false);
         }
     }
 
@@ -109,25 +139,42 @@ export class UsbService {
      */
     async closeDevice() {
 
-        this.storage.itemMap.update((map)=>{
-            for(let [key, val] of map) {
+        // 1. Immediately stop any pending read loops or timers
+        if(this.usbReadTmo) {
+            clearTimeout(this.usbReadTmo);
+            this.usbReadTmo = undefined;
+        }
+
+        // 2. Mark all items as invalid in the storage map
+        this.storage.itemMap.update((map) => {
+            for(const [, val] of map) {
                 val.isValid = false;
             }
             return new Map(map);
         });
 
-        if(this.valid_dev_flag() == true){
+        // 3. Close the USB device if active
+        if(this.valid_dev_flag() && this.usb_device) {
             this.valid_dev_flag.set(false);
+
+            // Cache the name before closing the connection
+            const productName = this.usb_device.productName || 'Unknown Device';
+
             try {
-                await this.usb_device.releaseInterface(0);
-                await this.usb_device.close();
+                if(this.usb_device.opened) {
+                    await this.usb_device.releaseInterface(0);
+                    await this.usb_device.close();
+                }
             }
-            catch(err) {
-                console.error(err);
+            catch (err) {
+                console.error('Error during USB device closure:', err);
+            }
+            finally {
+                this.usb_device = undefined; // Clear the stale device reference
             }
 
-            const msg = `device closed -> ${this.usb_device.productName}`;
-            this.utils.sendMsg(msg, 'red');
+            // Use a neutral/status color (e.g., 'orange' or 'info') instead of 'red' for a normal close
+            this.utils.sendMsg(`Device closed -> ${productName}`, 'orange');
         }
     }
 
@@ -139,29 +186,45 @@ export class UsbService {
      */
     async usbRead() {
 
-        let tmo = 100;
-
-        if(this.valid_dev_flag() == true){
-            try {
-                const usbMsg = await this.usb_device.transferIn(1, 64);
-                console.log(usbMsg);
-                if(usbMsg.status == 'ok'){
-                    this.processMsg(usbMsg);
-                }
-                else {
-                    tmo = 1000;
-                }
-            }
-            catch(err) {
-                tmo = 1000;
-                console.error(err);
-            }
+        if(this.isReading || !this.valid_dev_flag() || !this.usb_device) {
+            this.scheduleNextRead(1000);
+            return;
         }
 
-        this.usbReadTmo = setTimeout(()=>{
-            this.usbRead();
-        }, tmo);
+        this.isReading = true;
+        let tmo = 100;
+
+        try {
+            const usbMsg = await this.usb_device.transferIn(1, 64);
+
+            if(usbMsg.status === 'ok') {
+                this.processMsg(usbMsg);
+            }
+            else {
+                tmo = 1000; // Back off on non-ok status
+            }
+        }
+        catch(err: any) {
+            console.error('USB Read Error:', err);
+            tmo = 1000; // Back off on error
+        }
+        finally {
+            this.isReading = false;
+            this.scheduleNextRead(tmo);
+        }
     }
+
+    /***********************************************************************************************
+     * fn          scheduleNextRead
+     *
+     */
+    private scheduleNextRead(delay: number) {
+
+        if(this.usbReadTmo) {
+            clearTimeout(this.usbReadTmo);
+        }
+        this.usbReadTmo = setTimeout(() => this.usbRead(), delay);
+}
 
     /***********************************************************************************************
      * fn          processMsg
@@ -171,27 +234,21 @@ export class UsbService {
      */
     processMsg(usbMsg: USBInTransferResult) {
 
-        let i = 0;
-        let j = 0;
-        let hop_addr = 0;
         this.rwBuf.rdBuf = usbMsg.data!;
         this.rwBuf.rdIdx = 0;
 
         const msgType = this.rwBuf.read_uint8();
         switch(msgType){
             case gConst.USB_MSG_ITEM_REPORT: {
-                const devRep = {} as gIF.deviceReport_t;
-                devRep.hops = [];
-                for(i = 0; i < gConst.HOPS_MAX; i++){
-                    devRep.hops[i] = this.rwBuf.read_uint8();
-                }
-                devRep.partNum = this.rwBuf.read_uint16_LE();
-                devRep.addr = this.rwBuf.read_uint8();
-                const dataLen = this.rwBuf.read_uint8();
-                devRep.data = [];
-                for(i = 0; i < dataLen; i++){
-                    devRep.data.push(this.rwBuf.read_uint8());
-                }
+                const devRep: gIF.deviceReport_t = {
+                    hops: Array.from({ length: gConst.HOPS_MAX }, () => this.rwBuf.read_uint8()),
+                    partNum: this.rwBuf.read_uint16_LE(),
+                    addr: this.rwBuf.read_uint8(),
+                    data: (() => {
+                        const dataLen = this.rwBuf.read_uint8();
+                        return Array.from({ length: dataLen }, () => this.rwBuf.read_uint8());
+                    })()
+                };
 
                 this.parseDeviceReport(devRep);
 
@@ -208,7 +265,7 @@ export class UsbService {
      */
     parseDeviceReport(devRep: gIF.deviceReport_t): void {
 
-        const devProps = this.getProps(devRep) as gIF.epProps_t[];
+        const devProps = this.getProps(devRep);
         if(devProps.length === 0) {
             return;
         }
@@ -226,9 +283,8 @@ export class UsbService {
                 addr: devRep.addr,
                 endPoint: props.endPoint
             });
-            const mapItem = nextMap.get(key) as gIF.netItem_t | undefined;
+            const mapItem = nextMap.get(key);
             if(mapItem) {
-                // Create a shallow copy to trigger Angular's change detection
                 const updatedItem: gIF.netItem_t = {
                     ...mapItem,
                     frame_rnd: props.frame_rnd,
@@ -238,14 +294,13 @@ export class UsbService {
                     battery: props.battery?.rep_size ? { ...props.battery } : mapItem.battery
                 };
                 if(props.hasHistory) {
-                    //this.dataHistory(now, props.value, updatedItem);
-                    this.dataHistory(now, props.value, updatedItem, historyUpdates); // 2. Pass collection
+                    this.dataHistory(now, props.value, updatedItem, historyUpdates);
                 }
                 nextMap.set(key, updatedItem);
                 mapWasMutated = true;
             }
             else {
-                const nvProps = this.storage.nvPropsMap.get(key) as gIF.nvProps_t | undefined;
+                const nvProps = this.storage.nvPropsMap.get(key);
                 const item: gIF.netItem_t = {
                     partNum: devRep.partNum,
                     addr: devRep.addr,
@@ -267,19 +322,9 @@ export class UsbService {
                     valCorr: nvProps?.valCorr ?? { units: props.units, offset: 0 },
                     battery: props.battery?.rep_size ? { ...props.battery } : {
                         rep_size: 0,
-                        v_bat: undefined,
-                        i_bat: undefined,
-                        i_chg: undefined,
-                        i_bat_status: undefined,
-                        ntc_status: undefined,
-                        die_status: undefined,
-                        chg_status: undefined,
-                        chg_err: undefined
+                        v_bat: undefined
                     }
                 };
-                if(props.hasHistory) {
-                    this.dataHistory(now, props.value, item, historyUpdates); // 2. Pass collection
-                }
                 nextMap.set(key, item);
                 mapWasMutated = true;
             }
@@ -300,199 +345,144 @@ export class UsbService {
      */
     getProps(devRep: gIF.deviceReport_t) {
 
-        let props: gIF.epProps_t[] = [];
+        const props: gIF.epProps_t[] = [];
         const item_vals = new Uint8Array(devRep.data);
-        this.rwBuf.rdBuf = new DataView(item_vals.buffer);
+        this.rwBuf.rdBuf = new DataView(item_vals.buffer, item_vals.byteOffset, item_vals.byteLength);
         this.rwBuf.rdIdx = 0;
 
-        let mapItem: gIF.netItem_t;
-        let key: string;
-        let nvProps: gIF.nvProps_t;
-        let formatedVal = '';
-        let units: number;
+        const rnd = this.rwBuf.read_uint32_LE();
+        const ep = this.rwBuf.read_uint8();
+
+        const frameValid = this.check_frame(devRep, ep, rnd);
+
+        if(frameValid == false) {
+            console.log(`frame already processed`);
+            return props;
+        }
+
+        const emptyBattery: gIF.battery_t = {
+            rep_size: gIF.eBattRepSize.E_BATT_REP_SIZE_ZERO,
+            v_bat: undefined
+        };
 
         switch(devRep.partNum) {
             case gConst.SHT40_018: {
-                let t_props = {} as gIF.epProps_t;
-                t_props.valid = true;
-                t_props.frame_rnd = this.rwBuf.read_uint32_LE();
-                t_props.endPoint = this.rwBuf.read_uint8();
-                this.check_frame_rnd(devRep, t_props);
-                if(t_props.valid == true){
-                    let temp = this.rwBuf.read_uint16_LE();
-                    temp = -45.0 + 175.0 * temp / 65535.0;
-                    let corrTemp = temp;
-                    units = gConst.DEG_C;
-                    key = this.storage.itemKey({
-                        partNum: devRep.partNum,
-                        addr: devRep.addr,
-                        endPoint: t_props.endPoint
-                    });
+                const t_adc = this.rwBuf.read_uint16_LE();
+                const rh_ep = this.rwBuf.read_uint8();
+                const rh_adc = this.rwBuf.read_uint16_LE();
+                const battery = this.readBattery();
 
-                    formatedVal = `${corrTemp.toFixed(1)} °C`;
-                    nvProps = this.storage.nvPropsMap.get(key);
-                    if(nvProps){
-                        units = nvProps.valCorr.units;
-                        corrTemp = this.corrVal(temp, nvProps.valCorr);
-                        formatedVal = `${corrTemp.toFixed(1)} °C`;
-                        if(units === gConst.DEG_F){
-                            formatedVal = `${corrTemp.toFixed(1)} °F`;
-                        }
-                    }
+                const { temp, t_corr, units, t_unit } = this.processTemperature(devRep, ep, t_adc);
+                const { rh, rh_corr } = this.processHumidity(devRep, rh_ep, rh_adc);
 
-                    t_props.isVisible = true;
-                    t_props.group = gIF.eGroup_t.E_GROUP_TEMPERATURE;
-                    t_props.type = gIF.eType_t.E_TYPE_SENSOR;
-                    t_props.hasHistory = true;
-                    t_props.formatedVal = formatedVal;
-                    t_props.units = units;
-                    t_props.value = temp;
+                props.push({
+                    valid: true,
+                    frame_rnd: rnd,
+                    endPoint: ep,
+                    isVisible: true,
+                    group: gIF.eGroup_t.E_GROUP_TEMPERATURE,
+                    type: gIF.eType_t.E_TYPE_SENSOR,
+                    hasHistory: true,
+                    formatedVal: `${t_corr.toFixed(1)} ${t_unit}`,
+                    units: units,
+                    value: temp,
+                    battery: battery
+                });
 
-                    let rh_props = {} as gIF.epProps_t;
-                    rh_props.valid = true;
-                    rh_props.frame_rnd = t_props.frame_rnd;
-                    rh_props.endPoint = this.rwBuf.read_uint8();
-                    let rh = this.rwBuf.read_uint16_LE();
-                    rh = -6.0 + 125.0 * rh / 65535;
-                    let corrRH = rh;
-                    key = this.storage.itemKey({
-                        partNum: devRep.partNum,
-                        addr: devRep.addr,
-                        endPoint: rh_props.endPoint
-                    });
-                    nvProps = this.storage.nvPropsMap.get(key);
-                    if(nvProps) {
-                        corrRH = this.corrVal(rh, nvProps.valCorr);
-                    }
-                    rh_props.isVisible = true;
-                    rh_props.group = gIF.eGroup_t.E_GROUP_HUMIDITY;
-                    rh_props.type = gIF.eType_t.E_TYPE_SENSOR;
-                    rh_props.hasHistory = true;
-                    rh_props.formatedVal = `${corrRH.toFixed(0)} %rh`;
-                    rh_props.units = gConst.RH_UNIT;
-                    rh_props.value = rh;
+                props.push({
+                    valid: true,
+                    frame_rnd: rnd,
+                    endPoint: rh_ep,
+                    isVisible: true,
+                    group: gIF.eGroup_t.E_GROUP_HUMIDITY,
+                    type: gIF.eType_t.E_TYPE_SENSOR,
+                    hasHistory: true,
+                    formatedVal: `${rh_corr.toFixed(0)} %rh`,
+                    units: gConst.RH_UNIT,
+                    value: rh,
+                    battery: battery
+                });
 
-                    let battery = {} as gIF.battery_t;
-                    battery.rep_size = this.rwBuf.read_uint8();
-                    battery.v_bat = this.rwBuf.read_uint16_LE();
-                    if(battery.rep_size > gConst.SHORT_BAT_REPORT){
-                        battery.i_bat = this.rwBuf.read_uint16_LE();
-                        battery.i_chg = this.rwBuf.read_uint8();
-                        battery.i_bat_status = this.rwBuf.read_uint8();
-                        battery.ntc_status = this.rwBuf.read_uint8();
-                        battery.die_status = this.rwBuf.read_uint8();
-                        battery.chg_status = this.rwBuf.read_uint8();
-                        battery.chg_err = this.rwBuf.read_uint8();
-                    }
-                    t_props.battery = { ...battery };
-                    props.push(t_props);
-                    rh_props.battery = { ...battery };
-                    props.push(rh_props);
+                this.storage.tempEvent.set({
+                    temp: t_corr,
+                    addr: devRep.addr,
+                    endPoint: ep
+                });
 
-                    const tempEvent = {} as gIF.tempEvent_t;
-                    tempEvent.temp = corrTemp;
-                    tempEvent.addr = devRep.addr;
-                    tempEvent.endPoint = t_props.endPoint;
-                    this.storage.tempEvent.set(tempEvent);
-
-                    const battEvent = {} as gIF.battEvent_t;
-                    battEvent.addr = devRep.addr;
-                    battEvent.battery = { ...battery };
-                    this.storage.battEvent.set(battEvent);
-                }
+                this.storage.battEvent.set({
+                    addr: devRep.addr,
+                    battery: battery
+                });
                 break;
             }
 
             case gConst.SSR_009: {
-                let ssr_props = {} as gIF.epProps_t;
-                ssr_props.valid = true;
-                ssr_props.frame_rnd = this.rwBuf.read_uint32_LE();
-                ssr_props.endPoint = this.rwBuf.read_uint8();
-                this.check_frame_rnd(devRep, ssr_props);
-                if(ssr_props.valid == true){
-                    let state = this.rwBuf.read_uint8();
+                const state = this.rwBuf.read_uint8();
+                props.push({
+                    valid: true,
+                    frame_rnd: rnd,
+                    endPoint: ep,
+                    isVisible: true,
+                    group: gIF.eGroup_t.E_GROUP_ON_OFF,
+                    type: gIF.eType_t.E_TYPE_ACTUATOR,
+                    hasHistory: true,
+                    formatedVal: state ? 'on' : 'off',
+                    units: gConst.NO_UNIT,
+                    value: state,
+                    battery: emptyBattery
+                });
 
-                    ssr_props.isVisible = true;
-                    ssr_props.group = gIF.eGroup_t.E_GROUP_ON_OFF;
-                    ssr_props.type = gIF.eType_t.E_TYPE_ACUATOR;
-                    ssr_props.hasHistory = true;
-                    ssr_props.formatedVal = !!state ? 'on' : 'off';
-
-                    ssr_props.battery = {
-                        rep_size: 0,
-                        v_bat: 0,
-                        i_bat: 0,
-                        i_chg: 0,
-                        i_bat_status: 0,
-                        ntc_status: 0,
-                        die_status: 0,
-                        chg_status: 0,
-                        chg_err: 0
-                    };
-
-                    ssr_props.units = gConst.NO_UNIT;
-                    ssr_props.value = state;
-
-                    props.push(ssr_props);
-                }
                 break;
             }
-            /*
+
             case gConst.ENS_015_AQ: {
-                let aq = this.rwBuf.read_uint16_LE();
-                itemProps.isVisible = true;
-                itemProps.group = gIF.eGroup_t.E_GROUP_AIR_QUALITY;
-                itemProps.type = gIF.eType_t.E_TYPE_SENSOR;
-                itemProps.hasHistory = true;
-                itemProps.formatedVal = `aq - ${aq.toFixed(0)}`;
-                itemProps.units = gConst.NO_UNIT;
-                itemProps.value = aq;
+                const aq = this.rwBuf.read_uint8();
+                props.push({
+                    valid: true,
+                    frame_rnd: rnd,
+                    endPoint: ep,
+                    isVisible: true,
+                    group: gIF.eGroup_t.E_GROUP_AIR_QUALITY,
+                    type: gIF.eType_t.E_TYPE_SENSOR,
+                    hasHistory: true,
+                    formatedVal: `aq - ${aq.toFixed(0)}`,
+                    units: gConst.NO_UNIT,
+                    value: aq,
+                    battery: emptyBattery
+                });
                 break;
             }
-            */
+
             case gConst.PB_023: {
-                let pb_props = {} as gIF.epProps_t;
-                pb_props.valid = true;
-                pb_props.frame_rnd = this.rwBuf.read_uint32_LE();
-                pb_props.endPoint = this.rwBuf.read_uint8();
-                this.check_frame_rnd(devRep, pb_props);
-                if(pb_props.valid == true){
-                    let trig = this.rwBuf.read_uint8();
-                    let battery = {} as gIF.battery_t;
-                    battery.rep_size = this.rwBuf.read_uint8();
-                    battery.v_bat = this.rwBuf.read_uint16_LE();
-                    if(battery.rep_size > gConst.SHORT_BAT_REPORT){
-                        battery.i_bat = this.rwBuf.read_uint16_LE();
-                        battery.i_chg = this.rwBuf.read_uint8();
-                        battery.i_bat_status = this.rwBuf.read_uint8();
-                        battery.ntc_status = this.rwBuf.read_uint8();
-                        battery.die_status = this.rwBuf.read_uint8();
-                        battery.chg_status = this.rwBuf.read_uint8();
-                        battery.chg_err = this.rwBuf.read_uint8();
-                    }
-                    pb_props.isVisible = true;
-                    pb_props.group = gIF.eGroup_t.E_GROUP_ON_OFF;
-                    pb_props.type = gIF.eType_t.E_TYPE_SWITCH;
-                    pb_props.hasHistory = false;
-                    pb_props.formatedVal = `sw`;
-                    pb_props.battery = { ...battery };
-                    pb_props.units = gConst.NO_UNIT;
-                    pb_props.value = trig;
+                const trig = this.rwBuf.read_uint8();
+                const battery = this.readBattery();
 
-                    props.push(pb_props);
+                props.push({
+                    valid: true,
+                    frame_rnd: rnd,
+                    endPoint: ep,
+                    isVisible: true,
+                    group: gIF.eGroup_t.E_GROUP_ON_OFF,
+                    type: gIF.eType_t.E_TYPE_SWITCH,
+                    hasHistory: false,
+                    formatedVal: 'sw',
+                    units: gConst.NO_UNIT,
+                    value: trig,
+                    battery: battery
+                });
 
-                    if(trig){
-                        const pbEvent = {} as gIF.pbEvent_t;
-                        pbEvent.trig = trig;
-                        pbEvent.addr = devRep.addr;
-                        pbEvent.endPoint = pb_props.endPoint;
-                        this.storage.pbEvent.set(pbEvent);
-                    }
-                    const battEvent = {} as gIF.battEvent_t;
-                    battEvent.addr = devRep.addr;
-                    battEvent.battery = { ...battery };
-                    this.storage.battEvent.set(battEvent);
+                if(trig){
+                    this.storage.pbEvent.set({
+                        trig: trig,
+                        addr: devRep.addr,
+                        endPoint: ep
+                    });
                 }
+
+                this.storage.battEvent.set({
+                    addr: devRep.addr,
+                    battery: battery
+                });
                 break;
             }
 
@@ -505,27 +495,98 @@ export class UsbService {
     }
 
     /***********************************************************************************************
-     * fn          check_frame_rnd
-     *
-     * brief
+     * fn          check_frame
      *
      */
-    private check_frame_rnd(devRep: gIF.deviceReport_t, ep_props: gIF.epProps_t) {
+    private check_frame(devRep: gIF.deviceReport_t, ep: number, rnd: number): boolean {
 
-        let mapItem: gIF.netItem_t;
-        let key: string;
-
-        key = this.storage.itemKey({
+        const key = this.storage.itemKey({
             partNum: devRep.partNum,
             addr: devRep.addr,
-            endPoint: ep_props.endPoint
+            endPoint: ep
         });
-        mapItem = this.storage.itemMap().get(key);
-        if(mapItem){
-            if(mapItem.frame_rnd == ep_props.frame_rnd){
-                ep_props.valid = false
-            }
+
+        const mapItem = this.storage.itemMap().get(key);
+
+        if(mapItem && mapItem.frame_rnd === rnd) {
+            return false;
         }
+        return true;
+    }
+
+    /***********************************************************************************************
+     * fn          processTemperature
+     *
+     */
+    private processTemperature(devRep: gIF.deviceReport_t, ep: number, t_adc: number) {
+
+        const temp = parseFloat((-45.0 + (175.0 * t_adc) / 65535.0).toFixed(1));
+        let t_corr = temp;
+        let units = gConst.DEG_C;
+
+        const key = this.storage.itemKey({
+            partNum: devRep.partNum,
+            addr: devRep.addr,
+            endPoint: ep
+        });
+
+        const nvProps = this.storage.nvPropsMap.get(key);
+            if(nvProps) {
+                units = nvProps.valCorr.units;
+                t_corr = this.corrVal(temp, nvProps.valCorr);
+            }
+
+            const t_unit = units === gConst.DEG_F ? '°F' : '°C';
+
+            return { temp, t_corr, units, t_unit };
+    }
+
+    /***********************************************************************************************
+     * fn          processHumidity
+     *
+     */
+    private processHumidity(devRep: gIF.deviceReport_t, rh_ep: number, rh_adc: number) {
+
+        const rh = parseFloat((-6.0 + (125.0 * rh_adc) / 65535.0).toFixed(0));
+        let rh_corr = rh;
+
+        const key = this.storage.itemKey({
+            partNum: devRep.partNum,
+            addr: devRep.addr,
+            endPoint: rh_ep
+        });
+
+        const nvProps = this.storage.nvPropsMap.get(key);
+        if(nvProps) {
+            rh_corr = this.corrVal(rh, nvProps.valCorr);
+        }
+
+        return { rh, rh_corr };
+    }
+
+    /***********************************************************************************************
+     * fn          readBattery
+     *
+     */
+    private readBattery(): gIF.battery_t {
+
+        const rep_size = this.rwBuf.read_uint8();
+        const battery: gIF.battery_t = {
+            rep_size,
+            v_bat: this.rwBuf.read_uint16_LE()
+        };
+
+        if(rep_size > gConst.SHORT_BAT_REPORT) {
+            battery.i_bat = this.rwBuf.read_uint16_LE();
+            battery.i_chg = this.rwBuf.read_uint8();
+            battery.i_bat_status = this.rwBuf.read_uint8();
+            battery.ntc_status = this.rwBuf.read_uint8();
+            battery.die_status = this.rwBuf.read_uint8();
+            battery.chg_status = this.rwBuf.read_uint8();
+            battery.chg_err = this.rwBuf.read_uint8();
+        }
+
+        return battery;
     }
 
     /***********************************************************************************************
@@ -553,28 +614,31 @@ export class UsbService {
      * brief
      *
      */
-    private dataHistory(timestamp: number, val: number, item: gIF.netItem_t, batchArray: gIF.netItem_t[]) {
+    private dataHistory(timestamp: number,
+                        val: number,
+                        item: gIF.netItem_t,
+                        batchArray: gIF.netItem_t[]) {
 
-        let len = item.timestamps.length;
-        if(len > 0){
-            let last = item.timestamps[len - 1];
-            if((timestamp - last) > 59){
-                item.timestamps.push(timestamp);
-                item.vals.push(val);
-                len++;
-                if(len > gConst.HIST_LEN) {
-                    item.timestamps.shift();
-                    item.vals.shift();
-                }
-                //this.storage.chartData.set(item);
-                batchArray.push(item); // 3. Push to array instead of setting signal
-            }
+        const timestamps = item.timestamps;
+        const len = timestamps.length;
+
+        // Check if we need to filter by time difference (only if items already exist)
+        if(len > 0 && (timestamp - timestamps[len - 1]) <= 59) {
+            return; // Skip if interval is too short
         }
-        else {
-            item.timestamps.push(timestamp);
-            item.vals.push(val);
-            batchArray.push(item); // 3. Push to array instead of setting signal
+
+        // Insert new data points
+        timestamps.push(timestamp);
+        item.vals.push(val);
+
+        // Maintain maximum history length
+        if(timestamps.length > gConst.HIST_LEN) {
+            timestamps.shift();
+            item.vals.shift();
         }
+
+        // Queue for batch processing
+        batchArray.push(item);
     }
 
     /***********************************************************************************************
@@ -585,23 +649,41 @@ export class UsbService {
      */
     private cleanAgedItems() {
 
-        let diff: number;
-        let now = Math.round(Date.now() / 1000);
-        for(let [key, val] of this.storage.itemMap()) {
-            diff = now - val.timestamp;
+        const now = Math.floor(Date.now() / 1000);
+        const keysToDelete: string[] = [];
+        const keysToInvalidate: string[] = [];
+
+        for(const [key, val] of this.storage.itemMap()) {
+            const diff = now - val.timestamp;
             if(diff > gConst.ITEM_TTL) {
-                this.storage.itemMap.update((map)=>{
-                    map.delete(key);
-                    return new Map(map);
-                });
+                keysToDelete.push(key);
+                window.electronItemStore.delete(key);
+                this.storage.nvPropsMap.delete(key);
             }
-            if(diff > gConst.ITEM_VALID_TTL) {
-                val.isValid = false;
+            else if(diff > gConst.ITEM_VALID_TTL && val.isValid) {
+                keysToInvalidate.push(key);
             }
         }
-        setTimeout(()=>{
-            this.cleanAgedItems();
-        }, 60000); // 60 seconds
+        if(keysToDelete.length > 0|| keysToInvalidate.length > 0) {
+            this.storage.itemMap.update((map) => {
+                const newMap = new Map(map);
+                for(const key of keysToDelete) {
+                    newMap.delete(key);
+                }
+                for(const key of keysToInvalidate) {
+                    const mapItem = newMap.get(key);
+                    if(mapItem) {
+                        newMap.set(key, {
+                            ...mapItem,
+                            isValid: false
+                        });
+                    }
+                }
+                return newMap;
+            });
+        }
+
+        setTimeout(() => this.cleanAgedItems(), 60000);
     }
 
     /***********************************************************************************************
@@ -639,26 +721,12 @@ export class UsbService {
 
 
     /***********************************************************************************************
-     * fn          sendFrame
+     * fn          partNumToName
      *
      * brief
      *
      */
     partNumToName(partNum: number): string {
-
-        switch(partNum) {
-            case gConst.SHT40_018: {
-                return 'SHT40-018';
-            }
-            case gConst.SSR_009: {
-                return 'SSR-009';
-            }
-            case gConst.PB_023: {
-                return 'PB-023';
-            }
-            default: {
-                return 'unknown';
-            }
-        }
+        return gConst.PART_NAMES[partNum] ?? 'unknown';
     }
 }

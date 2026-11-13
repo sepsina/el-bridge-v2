@@ -14,14 +14,14 @@
             <div class="row-center">
                 <label for="usbDeviceSelect">device:</label>
                 <select id="usbDeviceSelect" [formField]="usbForm.selectedDeviceIndex">
-                    @for (usb of usb_devs(); track usb.id; let i = $index) {
+                    @for(usb of usbList(); track usb.id; let i = $index) {
                         <option [value]="i">{{ usb.name }}</option>
                     }
                 </select>
             </div>
 
             <div class="col-top-strech part-desc">
-                @for (desc of usb_desc(); track desc.key) {
+                @for(desc of usb_desc(); track desc.key) {
                     <div>
                         <span class="desc-label">{{ desc.key }}</span>
                         <span class="desc-value">{{ desc.value }}</span>

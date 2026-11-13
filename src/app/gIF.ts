@@ -26,7 +26,7 @@ export enum eGroup_t {
 }
 export enum eType_t {
     E_TYPE_SENSOR = 1,
-    E_TYPE_ACUATOR,
+    E_TYPE_ACTUATOR,
     E_TYPE_SWITCH,
     E_TYPE_BATTERY
 }
@@ -45,18 +45,17 @@ export interface routing_t {
 export interface battery_t {
     rep_size: number;
     v_bat: number | undefined;
-    i_bat: number | undefined;
-    i_chg: number | undefined;
-    i_bat_status: number | undefined;
-    ntc_status: number | undefined;
-    die_status: number | undefined;
-    chg_status: number | undefined;
-    chg_err: number | undefined;
+    i_bat?: number;
+    i_chg?: number;
+    i_bat_status?: number;
+    ntc_status?: number;
+    die_status?: number;
+    chg_status?: number;
+    chg_err?: number;
 }
 
 export interface battEvent_t {
     addr: number;
-    //endPoint: number;
     battery: battery_t;
 }
 
@@ -212,22 +211,22 @@ export interface imgDim_t {
     height: number;
 }
 
-export interface thermostatActuator_t {
+export interface xstatActuator_t {
     name: string;
     addr: number;
     endPoint: number;
 }
 
-export interface thermostat_t {
+export interface xstat_t {
     name: string;
     partNum: number;
     setPoint: number;
     prevSetPoint: number;
-    workPoint: number;
+    switchingThreshold: number;
     hysteresis: number;
     addr: number;
     endPoint: number;
-    actuators: thermostatActuator_t[];
+    actuators: xstatActuator_t[];
 }
 
 export interface on_off_actuator_t {
@@ -308,7 +307,7 @@ export class rwBuf_t {
     }
 
     read_uint64_LE(){
-        const val = this.rdBuf.getFloat64(this.rdIdx, true);
+        const val = this.rdBuf.getBigUint64(this.rdIdx, true);
         this.rdIdx += 8;
         return val;
     }
@@ -342,8 +341,8 @@ export class rwBuf_t {
         this.wrIdx += 4;
     }
 
-    write_uint64_LE(val: number){
-        this.wrBuf.setFloat64(this.wrIdx, val, true);
+    write_uint64_LE(val: number| bigint){
+        this.wrBuf.setBigUint64(this.wrIdx, BigInt(val), true);
         this.wrIdx += 8;
     }
 }
