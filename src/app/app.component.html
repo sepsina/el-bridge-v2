@@ -54,6 +54,11 @@
                 title="Show System Logs">
             <i class="fa fa-list-alt"></i>
         </button>
+        <button class="btn"
+                (click)="chooseBackground()"
+                title="Change Floor Plan Image">
+            <i class="fa fa-picture-o"></i>
+        </button>
 
         <div class="sidebar-divider"></div>
 
@@ -113,24 +118,20 @@
             <i class="fa fa-times-circle"></i>
         </button>
     </div>
-    <div id="plan-container" #containerRef (click)="clearSelection()">
+    <div id="plan-container">
         <div id="floor-plan"
              #floorPlanRef
              resizeObserver
              (resize)="onResize($event)"
              [style.height.px]="imgDim().height"
              [style.backgroundImage]="bkgImgUrl()"
-             style="background-attachment: scroll; background-repeat: no-repeat; background-size: contain; background-position: top left;"
-             /* (click)="$event.stopPropagation()" */
              (click)="clearSelection()">
             @for(keyVal of itemsList(); track keyVal.key){
-                <div #itemRef
-                    class="item"
+                <div class="item"
                     [class.item-draggable]="isDraggingEnabled()"
                     [class.item-selected]="selectedItemState().selectedItem?.key === keyVal.key"
                     [ngStyle]="keyVal.value | itemStyle"
                     cdkDrag
-                    #dragRef="cdkDrag"
                     [cdkDragDisabled]="!isDraggingEnabled()"
                     [cdkDragFreeDragPosition]="(keyVal.value | itemPosition: imgDim())!"
                     [cdkDragBoundary]="floorPlanRef"

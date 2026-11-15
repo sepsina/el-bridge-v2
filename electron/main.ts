@@ -3,6 +3,7 @@ import * as path from 'path';
 import { cfgUSB } from './configUSB';
 import { cfgUDP } from './configUDP';
 import { cfgStore } from './configStore';
+import { cfgFS } from './configFS';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -19,7 +20,6 @@ function createWindow() {
 
     cfgUSB(mainWindow.webContents);
     cfgUDP(mainWindow.webContents);
-    cfgStore();
 
     // Check if we are running in development mode
     const isDev = !app.isPackaged;
@@ -38,10 +38,16 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+    cfgStore();
+    cfgFS();
     createWindow();
 });
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 

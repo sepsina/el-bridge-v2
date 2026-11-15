@@ -2,7 +2,8 @@ import {
     ElectronUSB,
     ElectronUDP,
     ElectronItemStore,
-    ElectronStatStore
+    ElectronStatStore,
+    ElectronFs
 } from '../electron/preload';
 
 declare global {
@@ -11,5 +12,6 @@ declare global {
     electronUDP: ElectronUDP;
     electronItemStore: ElectronItemStore;
     electronStatStore: ElectronStatStore;
+    electronFs: ElectronFs;
   }
 }

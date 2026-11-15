@@ -12,7 +12,7 @@ import {
     computed
 } from '@angular/core';
 import { DragDropModule, CdkDragEnd, CdkDragStart } from "@angular/cdk/drag-drop";
-import { HttpClient, HttpErrorResponse, httpResource } from '@angular/common/http';
+import { HttpClient, httpResource } from '@angular/common/http';
 import { ResizeObserverDirective } from './directives/resize-observer.directive';
 import { Dialog, DialogModule } from '@angular/cdk/dialog';
 import { OverlayModule } from '@angular/cdk/overlay';
@@ -28,7 +28,6 @@ import * as gIF from './gIF';
 
 import { ItemStylePipe } from './pipes/item-style.pipe';
 import { ItemPositionPipe } from './pipes/item-position.pipe';
-import { map } from 'rxjs';
 
 @Component({
     selector: 'app-root',
@@ -50,8 +49,9 @@ import { map } from 'rxjs';
 })
 export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
 
-    containerRef = viewChild.required('containerRef', {read: ElementRef});
     floorPlanRef = viewChild.required('floorPlanRef', {read: ElementRef});
+
+    private readonly defaultFloorPlan = './assets/floor_plan.jpg';
 
     imgWidth = signal<number>(0);
     bkgImgWidth = signal<number>(1920);
@@ -66,6 +66,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         return { width, height };
     });
 
+    partsUrl = signal<string>('./assets/parts.json');
     partMap = new Map<number, gIF.part_t>();
     isDraggingEnabled = signal<boolean>(false);
 
@@ -83,7 +84,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         showGraph: false
     });
 
-    trash = 0;
+    trash = 1;
 
     footerTmo: ReturnType<typeof setTimeout> | null = null;
     footerStatus = signal('');
@@ -98,9 +99,14 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         return Array.from(map.entries()).map(([key, value]) => ({ key, value }));
     });
 
-    private partsResource = httpResource<gIF.partDesc_t[]>(() => './assets/parts.json');
+    private partsResource = httpResource<gIF.partDesc_t[]>(() => {
+        const url = this.partsUrl();
+        return url || undefined;
+    });
+
     private partsSyncEffect = effect(() => {
         const parts = this.partsResource.value();
+        const err = this.partsResource.error();
         if(parts) {
             this.partMap.clear();
             for(const desc of parts) {
@@ -111,8 +117,8 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
                 });
             }
         }
-        if(this.partsResource.error()) {
-            console.error('Parts catalog resource fetch failed:', this.partsResource.error());
+        if(err) {
+            console.error('Parts catalog resource fetch failed:', err);
         }
     });
 
@@ -156,7 +162,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      * brief
      *
      */
-    ngAfterViewInit() {
+    async ngAfterViewInit() {
         /*
         try {
             window.resizeTo(window.screen.availWidth, window.screen.availHeight);
@@ -167,14 +173,14 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         }
         */
 
-        setTimeout(() => {
-            this.init();
-        }, 10);
+        await this.setBkgImg();
 
-        setTimeout(() => {
-            this.capitalizeAtIndex();
-        }, 500);
+        //setTimeout(() => this.init(), 10);
+        setTimeout(() => this.capitalizeAtIndex(), 500);
+
     }
+
+
 
     /***********************************************************************************************
      * fn          ngOnInit
@@ -220,23 +226,81 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     /***********************************************************************************************
      * fn          init
      *
-     * brief
+     * brief       Loads the floor plan background and sets the canvas dimensions
      *
      */
     init() {
 
         const bkgImgPath = './assets/floor_plan.jpg';
         const bkgImg = new Image();
-        bkgImg.onload = ()=>{
-            this.bkgImgWidth.set(bkgImg.width);
-            this.bkgImgHeight.set(bkgImg.height);
+
+        bkgImg.onload = () => {
+            this.bkgImgWidth.set(bkgImg.naturalWidth);
+            this.bkgImgHeight.set(bkgImg.naturalHeight);
             this.bkgImgUrl.set(`url(${bkgImgPath})`);
 
-            const el = this.floorPlanRef().nativeElement;
-            const divDim = el.getBoundingClientRect();
-            this.imgWidth.set(divDim.width);
+            const container = this.floorPlanRef().nativeElement as HTMLElement;
+            this.imgWidth.set(container.getBoundingClientRect().width);
         };
+
+        bkgImg.onerror = () => {
+            console.error(`Failed to load floor plan image: ${bkgImgPath}`);
+        };
+
         bkgImg.src = bkgImgPath;
+    }
+
+    /***********************************************************************************************
+     * fn          setBkgImg
+     *
+     */
+    async setBkgImg(): Promise<void> {
+        // 1. Check if a custom floor plan was previously saved in Electron
+        const savedDataUrl = await window.electronFs.getSavedBg();
+
+        // 2. Use the saved image if available, otherwise fall back to your default asset
+        const bkgImgSrc = savedDataUrl ?? this.defaultFloorPlan;
+
+        // 3. Load the image to measure dimensions and update signals
+        this.loadImageAndUpdateSignals(bkgImgSrc);
+    }
+
+    /***********************************************************************************************
+     * fn          loadImageAndUpdateSignals
+     *
+     */
+    private loadImageAndUpdateSignals(imgSrc: string): void {
+
+        const bkgImg = new Image();
+
+        bkgImg.onload = () => {
+            this.bkgImgWidth.set(bkgImg.naturalWidth);
+            this.bkgImgHeight.set(bkgImg.naturalHeight);
+            this.bkgImgUrl.set(`url('${imgSrc}')`);
+
+            const container = this.floorPlanRef().nativeElement;
+            this.imgWidth.set(container.getBoundingClientRect().width);
+        };
+
+        bkgImg.onerror = () => {
+            console.error(`Failed to load floor plan image: ${imgSrc}`);
+        };
+
+        bkgImg.src = imgSrc;
+    }
+
+    /***********************************************************************************************
+     * fn          chooseBackground
+     *
+     */
+    async chooseBackground(): Promise<void> {
+
+        const newDataUrl = await window.electronFs.selectAndSaveBg();
+
+        if(newDataUrl) {
+            // Re-run dimension calculation and update signals with the new image
+            this.loadImageAndUpdateSignals(newDataUrl);
+        }
     }
 
     /***********************************************************************************************
@@ -248,7 +312,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     onDragEnded(event: CdkDragEnd, keyVal: gIF.keyVal_t) {
 
         const { width, height } = this.imgDim();
-        if (width === 0 || height === 0) return;
+        if(width === 0 || height === 0) return;
 
         const evtPos = event.source.getFreeDragPosition();
         const pos: gIF.nsPos_t = {
@@ -290,7 +354,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
 
         const currentSelection = this.selectedItemState().selectedItem;
         if (!currentSelection) {
-            console.warn('Style dialog abort: No item layout configuration actively selected.');
+            console.warn('Style dialog abort: No item selected.');
             return;
         }
 
@@ -312,7 +376,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     /***********************************************************************************************
      * @fn          setName
      *
-     * @brief
+     * brief
      *
      */
 
@@ -321,7 +385,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         const currentSelection = this.selectedItemState().selectedItem;
 
         if (!currentSelection) {
-            console.warn('Name dialog abort: No item layout configuration actively selected.');
+            console.warn('Name dialog abort: No item selected.');
             return;
         }
 
@@ -350,7 +414,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
 
         const currentSelection = this.selectedItemState().selectedItem;
         if (!currentSelection) {
-            console.warn('Correction dialog abort: No item layout configuration actively selected.');
+            console.warn('Correction dialog abort: No item selected.');
             return;
         }
 
@@ -379,7 +443,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
 
         const currentSelection = this.selectedItemState().selectedItem;
         if (!currentSelection) {
-            console.warn('Graph dialog abort: No item layout configuration actively selected.');
+            console.warn('Graph dialog abort: No item selected.');
             return;
         }
 
@@ -425,28 +489,6 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         });
     }
 
-    /***********************************************************************************************
-     * @fn          editScrolls
-     *
-     * @brief
-     *
-     *
-    async editScrolls() {
-
-        const { EditScrolls } = await import('./edit-scrolls/edit-scrolls');
-        const dlgRef = this.dialog.open(EditScrolls, {
-            data: {
-                containerRef: this.containerRef().nativeElement,
-                imgDim: this.imgDim,
-            },
-            restoreFocus: false,
-
-        });
-        dlgRef.closed.subscribe((data)=>{
-            console.log(`scrolls dlg data: ${data}`);
-        });
-    }
-    */
     /***********************************************************************************************
      * @fn          editThermostats
      *
@@ -494,7 +536,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
 
         const currentSelection = this.selectedItemState().selectedItem;
         if (!currentSelection) {
-            console.warn('About dialog abort: No item layout configuration actively selected.');
+            console.warn('About dialog abort: No item selected.');
             return;
         }
 
@@ -522,7 +564,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
 
         const currentSelection = this.selectedItemState().selectedItem;
         if (!currentSelection) {
-            console.warn('Battery dialog abort: No item layout configuration actively selected.');
+            console.warn('Battery dialog abort: No item selected.');
             return;
         }
 
@@ -550,7 +592,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
 
         const currentSelection = this.selectedItemState().selectedItem;
         if (!currentSelection) {
-            console.warn('SSR dialog abort: No item layout configuration actively selected.');
+            console.warn('SSR dialog abort: No item selected.');
             return;
         }
 
@@ -638,13 +680,11 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     mouseEnterItem(keyVal: gIF.keyVal_t) {
 
         const item = keyVal.value;
-        const partDesc: gIF.part_t = this.partMap.get(item.partNum) || { devName: 'unknown', part: 'unknown', url: '' };
+        const partDesc: gIF.part_t = this.partMap.get(item.partNum) ?? { devName: 'unknown', part: 'unknown', url: '' };
 
-        const status = `${item.name}: ${partDesc.part} -> ${partDesc.devName}`;
-        this.footerStatus.set(status);
+        this.footerStatus.set(`${item.name}: ${partDesc.part} -> ${partDesc.devName}`);
 
-        if (this.footerTmo) clearTimeout(this.footerTmo);
-
+        clearTimeout(this.footerTmo ?? undefined);
         this.footerTmo = setTimeout(() => {
             this.footerStatus.set('');
         }, 5000);
@@ -655,7 +695,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      *
      */
     mouseLeaveItem() {
-        if (this.footerTmo) clearTimeout(this.footerTmo);
+        if(this.footerTmo) clearTimeout(this.footerTmo);
         this.footerStatus.set('');
     }
 
@@ -723,7 +763,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      *
      */
     pbEvent(event: gIF.pbEvent_t){
-        console.log(event);
+        console.log(`Push button event: Address=${event.addr}, Endpoint=${event.endPoint}`);
     }
 
     /***********************************************************************************************
@@ -734,6 +774,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      */
     disableRightClick(event: MouseEvent){
         event.preventDefault();
+        event.stopPropagation();
     }
 
     /***********************************************************************************************
@@ -744,23 +785,18 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      */
     capitalizeAtIndex() {
 
-        if(this.usb.valid_dev_flag() == false){
+        if(this.usb.valid_dev_flag() === false) {
             const status = this.usbStatus().toLowerCase();
-            let new_status = status;
-
-            this.strIdx++;
-            if(this.strIdx == status.length){
-                this.strIdx = 0;
+            if(status.length > 0) {
+                this.strIdx = (this.strIdx + 1) % status.length;
+                this.usbStatus.set(
+                    status.slice(0, this.strIdx) +
+                    status[this.strIdx].toUpperCase() +
+                    status.slice(this.strIdx + 1)
+                );
             }
-            new_status  = status.substring(0, this.strIdx);
-            new_status += status[this.strIdx].toUpperCase();
-            new_status += status.substring(this.strIdx + 1);
-
-            this.usbStatus.set(new_status);
         }
-        setTimeout(() => {
-            this.capitalizeAtIndex();
-        }, 200);
+        setTimeout(() => this.capitalizeAtIndex(), 200);
     }
 
     /***********************************************************************************************
@@ -770,7 +806,6 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     moveSelectedItem(direction: 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown', fast = false) {
 
         const currentSelection = this.selectedItemState().selectedItem;
-
         if(!currentSelection || !this.isDraggingEnabled()) {
             return;
         }
@@ -787,7 +822,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         let maxX = 1;
         let maxY = 1;
 
-        if(containerEl && selectedEl) {
+        if(selectedEl) {
             const containerRect = containerEl.getBoundingClientRect();
             const selectedRect = selectedEl.getBoundingClientRect();
 
@@ -796,26 +831,18 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
                 maxY = Math.max(0, 1 - (selectedRect.height / containerRect.height));
             }
         }
+
         let newX = pos.x;
         let newY = pos.y;
 
         switch(direction) {
-            case 'ArrowLeft':
-                newX = Math.max(0, pos.x - step);
-                break;
-            case 'ArrowRight':
-                newX = Math.min(maxX, pos.x + step);
-                break;
-            case 'ArrowUp':
-                newY = Math.max(0, pos.y - step);
-                break;
-            case 'ArrowDown':
-                newY = Math.min(maxY, pos.y + step);
-                break;
+            case 'ArrowLeft':  newX = Math.max(0, pos.x - step); break;
+            case 'ArrowRight': newX = Math.min(maxX, pos.x + step); break;
+            case 'ArrowUp':    newY = Math.max(0, pos.y - step); break;
+            case 'ArrowDown':  newY = Math.min(maxY, pos.y + step); break;
         }
-        const newPos: gIF.nsPos_t = { x: newX, y: newY };
-        this.storage.setItemPos(newPos, latestKeyVal);
 
+        this.storage.setItemPos({ x: newX, y: newY }, latestKeyVal);
     }
 
     /***********************************************************************************************
@@ -825,7 +852,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     @HostListener('window:keydown', ['$event'])
     onKeyDown(event: KeyboardEvent) {
         const arrowKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-        if (!arrowKeys.includes(event.key)) {
+        if(!arrowKeys.includes(event.key)) {
             return;
         }
         event.preventDefault();

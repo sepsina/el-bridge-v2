@@ -1,8 +1,7 @@
 import {
     Directive,
     ElementRef,
-    OnDestroy,
-    NgZone,
+    DestroyRef,
     output,
     inject
 } from '@angular/core';
@@ -11,40 +10,45 @@ import {
     selector: '[resizeObserver]',
     standalone: true,
 })
-export class ResizeObserverDirective implements OnDestroy {
+export class ResizeObserverDirective {
+
     resize = output<ResizeObserverEntry>();
 
-    private el = inject(ElementRef);
-    private ngZone = inject(NgZone);
-    private observer?: ResizeObserver;
-    private timeoutId: any = null;
+    private readonly el = inject<ElementRef<HTMLElement>>(ElementRef);
+    private readonly destroyRef = inject(DestroyRef);
+
+    private observer: ResizeObserver | null = null;
+    private frameId: number | null = null;
+    private latestEntry: ResizeObserverEntry | null = null;
 
     constructor() {
         this.observer = new ResizeObserver((entries) => {
-        if (this.timeoutId) {
-            clearTimeout(this.timeoutId);
-        }
+            this.latestEntry = entries[entries.length - 1] ?? null;
 
-        // Track window resizing silently in the background
-        this.timeoutId = setTimeout(() => {
-            this.timeoutId = null;
-
-            // Re-enter Angular's change detection zone only on the final debounced emit
-            this.ngZone.run(() => {
-            if (entries.length > 0) {
-                this.resize.emit(entries[0]);
+            if(this.frameId !== null) {
+                return;
             }
+
+            this.frameId = requestAnimationFrame(() => {
+                this.frameId = null;
+                const entry = this.latestEntry;
+                this.latestEntry = null;
+                if(entry) {
+                    this.resize.emit(entry);
+                }
             });
-        }, 200);
         });
 
         this.observer.observe(this.el.nativeElement);
-    }
 
-    ngOnDestroy() {
-        if (this.timeoutId) {
-            clearTimeout(this.timeoutId);
-        }
-        this.observer?.disconnect();
+        this.destroyRef.onDestroy(() => {
+            if(this.frameId !== null) {
+                cancelAnimationFrame(this.frameId);
+                this.frameId = null;
+            }
+            this.observer?.disconnect();
+            this.observer = null;
+            this.latestEntry = null;
+        });
     }
 }

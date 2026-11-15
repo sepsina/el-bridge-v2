@@ -103,6 +103,10 @@
     margin: 0;
     position: relative;
     width: 100%;
+    background-attachment: scroll;
+    background-repeat: no-repeat;
+    background-size: contain;
+    background-position: top left;
 }
 
 /* Angular CDK applies this class instantly when dragging starts */

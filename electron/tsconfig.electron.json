@@ -11,6 +11,7 @@
         "preload.ts",
         "configUSB.ts",
         "configUDP.ts",
-        "configStore.ts"
+        "configStore.ts",
+        "configFS.ts"
     ]
 }

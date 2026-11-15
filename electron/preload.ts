@@ -19,6 +19,12 @@ interface StoreApi {
     getSize?(): Promise<number>; // Optional if not all stores have it
 }
 
+// File system API
+const fsApi = {
+    selectAndSaveBg: () => ipcRenderer.invoke('select-and-save-bg'),
+    getSavedBg: () => ipcRenderer.invoke('get-saved-bg')
+};
+
 // factory function to eliminate duplication
 const createStoreApi = (prefix: string): StoreApi => ({
     get: (key) => ipcRenderer.invoke(`${prefix}-get`, key),
@@ -85,10 +91,12 @@ export type ElectronUSB = typeof usbApi;
 export type ElectronUDP = typeof udpApi;
 export type ElectronStatStore = typeof statStoreApi;
 export type ElectronItemStore = typeof itemStoreApi;
+export type ElectronFs = typeof fsApi;
 
 // Publish API
 contextBridge.exposeInMainWorld('electronUSB', usbApi);
 contextBridge.exposeInMainWorld('electronUDP', udpApi);
 contextBridge.exposeInMainWorld('electronStatStore', statStoreApi);
 contextBridge.exposeInMainWorld('electronItemStore', itemStoreApi);
+contextBridge.exposeInMainWorld('electronFs', fsApi);
 
