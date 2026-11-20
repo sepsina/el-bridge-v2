@@ -1,15 +1,18 @@
 <div class="row-left-stretch" id="main-container">
-    <div class="col-top-strech" id="side-bar">
+    <div id="side-bar">
         <label class="sidebar-toggle-label" [class.active]="isDraggingEnabled()" title="Toggle Canvas Drag Locking Mode">
             <input
+                #toggle
                 type="checkbox"
                 [checked]="isDraggingEnabled()"
-                (change)="isDraggingEnabled.set($event.target.checked)"
+                (change)="isDraggingEnabled.set(toggle.checked)"
                 style="display: none;"> <!-- Hide raw checkbox box -->
-            <i class="fa" [class.fa-lock]="!isDraggingEnabled()" [class.fa-unlock]="isDraggingEnabled()"></i>
+            <span class="move-lock-icons">
+                <i class="fa fa-arrows"></i>
+                <i class="fa" [class.fa-lock]="!isDraggingEnabled()" [class.fa-unlock]="isDraggingEnabled()"></i>
+            </span>
         </label>
 
-        <!-- TEST -->
         @if(selectedItemState().selectedItem && isDraggingEnabled()) {
             <div class="touch-dpad-container">
                 <div class="dpad-row">
@@ -35,11 +38,11 @@
                 </div>
             </div>
         }
-        <!-- END TEST -->
 
         <div class="sidebar-divider"></div>
 
         <button class="btn"
+                [class.usb-flash]="!usb.valid_dev_flag()"
                 (click)="onUsbReqDev()"
                 title="Request USB Device">
             <i class="fa fa-usb"></i>
@@ -148,11 +151,11 @@
     </div>
 </div>
 <div class="row-right footer">
-    @if(usb.valid_dev_flag() == false){
+    <!-- @if(!usb.valid_dev_flag()){
         <div class="row-left" id="usbStatus">
             {{usbStatus()}}
         </div>
-    }
+    } -->
     <div class="row-right" id="footStat">
         {{footerStatus()}}
     </div>

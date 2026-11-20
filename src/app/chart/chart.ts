@@ -1,12 +1,15 @@
 import {
     Component,
     OnInit,
+    OnDestroy,
     signal,
     inject,
     effect,
     ChangeDetectionStrategy,
     viewChild,
-    ElementRef
+    ElementRef,
+    AfterViewInit,
+    untracked
 } from '@angular/core';
 
 import { DialogRef,
@@ -51,7 +54,7 @@ interface GraphFormState {
     },
     changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class Graph implements OnInit {
+export class Graph implements OnInit, AfterViewInit, OnDestroy {
 
     readonly hostID = 'graph-dlg';
 
@@ -77,9 +80,11 @@ export class Graph implements OnInit {
     constructor() {
         effect(() => {
             const items = this.storage.chartData();
-            for (const item of items) {
-                this.newData(item);
-            }
+            untracked(() => {
+                for(const item of items) {
+                    this.newData(item);
+                }
+            });
         });
     }
 
@@ -89,8 +94,24 @@ export class Graph implements OnInit {
      */
     ngOnInit() {
         this.currentItem.set(this.dlgData.keyVal.value);
+    }
+
+    /***********************************************************************************************
+     * @fn          ngAfterViewInit
+     *
+     */
+    ngAfterViewInit() {
         this.createChart();
         this.setChartData();
+    }
+
+    /***********************************************************************************************
+     * @fn          ngOnDestroy
+     *
+     */
+    ngOnDestroy() {
+        this.chart?.destroy();
+        this.chart = undefined as unknown as Chart;
     }
 
     /***********************************************************************************************
@@ -151,7 +172,7 @@ export class Graph implements OnInit {
                     tooltip: { enabled: true, displayColors: false }
                 },
                 onClick: (event, elements, chart) => {
-                    if (elements && elements.length > 0) {
+                    if(elements && elements.length > 0) {
                         const idx = elements[0].index;
 
                         // Mutate your Form Signals safely on item selection
@@ -162,7 +183,8 @@ export class Graph implements OnInit {
 
                         this.graphForm.selTime().value.set(`time: ${time}`);
                         this.graphForm.selValue().value.set(`value: ${value.toFixed(1)}`);
-                    } else {
+                    }
+                    else {
                         this.resetSelection();
                     }
                 }
@@ -176,70 +198,74 @@ export class Graph implements OnInit {
      */
     setChartData() {
 
-        const item = this.currentItem();
-        this.chart.data.labels = [];
-        this.chart.data.datasets[0].data = [];
+        if(!this.chart) {
+            return; // view not ready; ngAfterViewInit draws currentItem
+        }
 
-        const len = item.timestamps?.length || 0;
+        const item = this.currentItem();
+        const timestamps = item.timestamps ?? [];
+        const len = timestamps.length;
+
         if(len === 0) {
+            this.chart.data.labels = [];
+            this.chart.data.datasets[0].data = [];
             this.duration.set(this.utils.secToTime(0));
             this.chart.update('none');
             return;
         }
 
-        const end = item.timestamps[len - 1];
-        let minVal = 1e6;
-        let maxVal = -1e6;
-        const offset = item.valCorr.offset;
+        const toF = item.group === gIF.eGroup_t.E_GROUP_TEMPERATURE
+                    && item.valCorr?.units === gConst.DEG_F;
+
+        const end = timestamps[len - 1];
+        const labels: string[] = new Array(len);
+        const data: number[] = new Array(len);
+        let minVal = Infinity;
+        let maxVal = -Infinity;
 
         for(let i = 0; i < len; i++) {
-            let corrVal = item.vals[i] + offset;
-            switch(item.group) {
-                case gIF.eGroup_t.E_GROUP_TEMPERATURE: {
-                    if(item.valCorr.units === gConst.DEG_F) {
-                        corrVal = (corrVal * 9.0) / 5.0 + 32.0;
-                    }
-                    break;
-                }
-            }
-            this.chart.data.datasets[0].data[i] = corrVal;
-            this.chart.data.labels[i] = this.utils.secToTime(end - item.timestamps[i]);
+            const val = toF ? (item.vals[i] * 9.0) / 5.0 + 32.0 : item.vals[i];
+            data[i] = val;
+            labels[i] = this.utils.secToTime(end - timestamps[i]);
 
-            if(corrVal > maxVal) maxVal = corrVal;
-            if(corrVal < minVal) minVal = corrVal;
+            if(val > maxVal) maxVal = val;
+            if(val < minVal) minVal = val;
         }
 
-        const timeSpan = item.timestamps[len - 1] - item.timestamps[0];
-        this.duration.set(`${this.utils.secToTime(timeSpan)}`);
+        this.chart.data.labels = labels;
+        this.chart.data.datasets[0].data = data;
 
-        let step = 1;
-        let max = Math.ceil(maxVal);
-        if((max - maxVal) < 0.1) max++;
-        let min = max;
-        while(min >= minVal) min--;
+        this.duration.set(this.utils.secToTime(end - timestamps[0]));
 
-        if(maxVal > minVal) {
-            step = Math.ceil((maxVal - minVal) / 4);
-            max = Math.ceil(maxVal);
-            if((max - maxVal) < 0.1) max += step;
-            min = max;
-            while(min >= minVal) min -= step;
-        }
-
-        const yAxis = this.chart.options.scales!['y'] as any;
-
-        if(yAxis) {
-            yAxis.max = max;
-            yAxis.min = min;
-
-            if(!yAxis.ticks) {
-                yAxis.ticks = {};
-            }
-            yAxis.ticks.stepSize = step;
-        }
-
+        this.updateYAxis(minVal, maxVal);
         this.configureTooltips(item);
         this.chart.update('none');
+    }
+
+    /***********************************************************************************************
+     * @fn          updateYAxis
+     *
+     * brief       auto scale the y axis so that all values fit with some margin
+     *
+     */
+    private updateYAxis(minVal: number, maxVal: number) {
+
+        const yAxis = this.chart.options.scales!['y'] as any;
+        if(!yAxis) {
+            return;
+        }
+
+        const step = maxVal > minVal ? Math.ceil((maxVal - minVal) / 4) : 1;
+
+        let max = Math.ceil(maxVal);
+        if((max - maxVal) < 0.1) max += step;
+
+        let min = max;
+        while(min >= minVal) min -= step;
+
+        yAxis.max = max;
+        yAxis.min = min;
+        yAxis.ticks = { ...(yAxis.ticks ?? {}), stepSize: step };
     }
 
     /***********************************************************************************************
@@ -320,8 +346,9 @@ export class Graph implements OnInit {
      *
      */
     delSelPoint() {
+
         const idx = this.graphForm.selIdx().value();
-        if (idx < 0) return;
+        if(idx < 0) return;
 
         const item = this.currentItem();
         item.vals.splice(idx, 1);
@@ -336,12 +363,15 @@ export class Graph implements OnInit {
      *
      */
     newData(item: gIF.netItem_t) {
-        const current = this.currentItem();
-        if (item.addr === current.addr &&
-            item.endPoint === current.endPoint &&
-            item.group === current.group &&
-            item.type === current.type) {
 
+        const current = this.currentItem();
+
+        if(item.addr === current.addr
+           && item.endPoint === current.endPoint
+           && item.group === current.group
+           && item.type === current.type) {
+
+            this.currentItem.set(item);
             this.resetSelection();
             this.setChartData();
         }

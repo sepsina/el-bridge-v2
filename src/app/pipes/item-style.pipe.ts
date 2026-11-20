@@ -29,21 +29,24 @@ export class ItemStylePipe implements PipeTransform {
 
   transform(item: StyleItem): Record<string, string | number> {
 
-        if(!item.isValid) {
-            return {
-                'color': 'gray',
-                'background-color': 'transparent',
-                'border-color': 'gray',
-                'border-width': '2px',
-                'border-style': 'dotted'
-            };
-        }
-
         const {
             color, bgColor, bgOpacity, fontSize, borderColor,
             borderWidth, borderStyle, borderRadius,
             paddingTop, paddingRight, paddingBottom, paddingLeft
         } = item.style;
+
+        if(!item.isValid) {
+            return {
+                'color': 'gray',
+                'background-color': 'transparent',
+                'font-size': `${fontSize}px`,
+                'border-color': 'gray',
+                'border-width': '2px',
+                'border-style': 'dotted',
+                'border-radius': `${borderRadius}px`,
+                'padding': `${paddingTop}px ${paddingRight}px ${paddingBottom}px ${paddingLeft}px`
+            };
+        }
 
         return {
             'color': color,

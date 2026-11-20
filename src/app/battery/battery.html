@@ -1,5 +1,4 @@
-<div class="col-top-strech"
-     cdkDrag
+<div cdkDrag
      cdkDragRootElement="#battery-dlg"
      cdkDragBoundary=".cdk-overlay-container">
 
@@ -11,7 +10,7 @@
             <i class="fa fa-times"></i>
         </button>
     </div>
-    <div class="col-top-strech dlg-body">
+    <div class="dlg-body">
         @for(row of dataRows(); track row.id){
             <div class = "row-left-stretch data-row-all">
                 <label>{{row.label}}</label>

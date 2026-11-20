@@ -1,80 +1,90 @@
-import { app, ipcMain, dialog } from 'electron';
+import { app, ipcMain, dialog, BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 
 interface BgConfig {
-  bgPath: string;
+    bgPath: string;
 }
 
-const userDataPath: string = app.getPath('userData');
-const configPath: string = path.join(userDataPath, 'bg-config.json');
+let ipcRegistered = false;
 
-function getImageAsDataUrl(filePath: string): string | null {
+const getConfigPath = (): string => path.join(app.getPath('userData'), 'bg-config.json');
 
-    if (!fs.existsSync(filePath)) return null;
+async function getImageAsDataUrl(filePath: string): Promise<string | null> {
+    try {
+        const ext: string = path.extname(filePath).slice(1).toLowerCase();
+        const mimeType: string = ext === 'jpg' ? 'jpeg' : ext;
+        const base64: string = await fs.promises.readFile(filePath, { encoding: 'base64' });
 
-    const ext: string = path.extname(filePath).slice(1).toLowerCase();
-    const mimeType: string = ext === 'jpg' ? 'jpeg' : ext;
-    const base64: string = fs.readFileSync(filePath, { encoding: 'base64' });
+        return `data:image/${mimeType};base64,${base64}`;
+    }
+    catch {
+        return null; // missing or unreadable file
+    }
+}
 
-    return `data:image/${mimeType};base64,${base64}`;
+async function readConfig(): Promise<BgConfig | null> {
+    try {
+        const config = JSON.parse(await fs.promises.readFile(getConfigPath(), 'utf-8'));
+        return typeof config?.bgPath === 'string' ? config as BgConfig : null;
+    }
+    catch {
+        return null; // missing or corrupted config
+    }
 }
 
 export function cfgFS() {
 
-    // 1. Pick, clean up old file, copy new image, and save config
-    ipcMain.handle('select-and-save-bg', async (): Promise<string | null> => {
+    // register global IPC handlers only once
+    if(ipcRegistered) return;
+    ipcRegistered = true;
 
-        const result = await dialog.showOpenDialog({
+    // 1. Pick, clean up old file, copy new image, and save config
+    ipcMain.handle('select-and-save-bg', async (event): Promise<string | null> => {
+
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const options: Electron.OpenDialogOptions = {
             properties: ['openFile'],
             filters: [{
                 name: 'Images',
                 extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp']
             }]
-        });
+        };
 
-        if (result.canceled || result.filePaths.length === 0) {
+        const result = win
+            ? await dialog.showOpenDialog(win, options)
+            : await dialog.showOpenDialog(options);
+
+        if(result.canceled || result.filePaths.length === 0) {
             return null;
         }
 
-        // Read old config before overwriting it
-        let oldBgPath: string | null = null;
-        if(fs.existsSync(configPath)) {
-            try {
-                const oldConfig: BgConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-                oldBgPath = oldConfig.bgPath ?? null;
+        try {
+            const oldBgPath = (await readConfig())?.bgPath ?? null;
+
+            const sourcePath: string = result.filePaths[0];
+            const ext: string = path.extname(sourcePath).toLowerCase();
+            const destPath: string = path.join(app.getPath('userData'), `custom-background${ext}`);
+
+            await fs.promises.copyFile(sourcePath, destPath);
+            await fs.promises.writeFile(getConfigPath(), JSON.stringify({ bgPath: destPath }, null, 2));
+
+            // Remove the old file only if it is a different file from the new one
+            if(oldBgPath && oldBgPath !== destPath) {
+                await fs.promises.unlink(oldBgPath).catch(() => { /* already gone */ });
             }
-            catch {
-                // Ignore corrupted config read errors
-            }
+
+            return await getImageAsDataUrl(destPath);
         }
-
-        const sourcePath: string = result.filePaths[0];
-        const ext: string = path.extname(sourcePath);
-        const destPath: string = path.join(userDataPath, `custom-background${ext}`);
-
-        fs.copyFileSync(sourcePath, destPath);
-        fs.writeFileSync(configPath, JSON.stringify({ bgPath: destPath }, null, 2));
-
-        // Remove the old file only if it is a different file from the new one
-        if(oldBgPath && oldBgPath !== destPath && fs.existsSync(oldBgPath)) {
-            fs.unlinkSync(oldBgPath);
+        catch(err) {
+            console.error(`[select-and-save-bg] ${(err as Error).message}`);
+            return null;
         }
-
-        return getImageAsDataUrl(destPath);
     });
 
     // 2. Load saved background on startup
-    ipcMain.handle('get-saved-bg', (): string | null => {
-
-        if (!fs.existsSync(configPath)) return null;
-
-        try {
-            const config: BgConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-            return getImageAsDataUrl(config.bgPath);
-        }
-        catch {
-            return null;
-        }
+    ipcMain.handle('get-saved-bg', async (): Promise<string | null> => {
+        const config = await readConfig();
+        return config ? getImageAsDataUrl(config.bgPath) : null;
     });
 }

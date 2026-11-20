@@ -13,18 +13,36 @@ export interface UdpPkt {
 }
 
 const UDP_PORT = 22802;
-let udpSocket = {} as dgram.Socket;
+let udpSocket: dgram.Socket | null = null;
+let ipcRegistered = false;
+
+function closeSocket(): void {
+    if(udpSocket) {
+        try {
+            udpSocket.close();
+        }
+        catch {
+            // already closed
+        }
+        udpSocket = null;
+    }
+}
 
 export function cfgUDP(web_contents: WebContents): void {
+    closeSocket(); // avoid leaking a previous socket
 
-    udpSocket = dgram.createSocket('udp4');
+    const socket = dgram.createSocket('udp4');
+    udpSocket = socket;
+
+    //udpSocket = dgram.createSocket('udp4');
 
     udpSocket.on('error', (err) => {
         console.error(`udp error:\n${err.stack}`);
-        udpSocket.close();
+        closeSocket();
     });
 
     udpSocket.on('message', (udp_msg: Uint8Array, rem_info: dgram.RemoteInfo) => {
+        if(web_contents.isDestroyed()) return;
         // just forward to renderer
         const udpPkt: UdpPkt = {
             payload: udp_msg,
@@ -34,15 +52,22 @@ export function cfgUDP(web_contents: WebContents): void {
         web_contents.send('udp-packet-in', udpPkt);
     });
 
-    udpSocket.bind(UDP_PORT);
-
-    udpSocket.on('listening', () => {
-        udpSocket.setBroadcast(true);
-        const address = udpSocket.address();
+    socket.on('listening', () => {
+        socket.setBroadcast(true);
+        const address = socket.address();
         console.log(`server listening ${address.address}:${address.port}`);
     });
 
+    udpSocket.bind(UDP_PORT);
+
+    web_contents.once('destroyed', closeSocket);
+
+    // register global IPC listeners only once
+    if(ipcRegistered) return;
+    ipcRegistered = true;
+
     ipcMain.on("udp-packet-out", (_event: IpcMainEvent, udp_pkt: UdpPkt)=>{
+        if(!udpSocket) return;
         udpSocket.send(
             udp_pkt.payload,
             udp_pkt.port,
@@ -56,7 +81,7 @@ export function cfgUDP(web_contents: WebContents): void {
     });
 
     ipcMain.on("udp-close", (_event: IpcMainEvent, msg: string)=>{
-        udpSocket.close();
+        closeSocket();
         console.log(`close msg: ${msg}`);
     });
 }

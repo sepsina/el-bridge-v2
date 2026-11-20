@@ -11,6 +11,8 @@ import { CdkDrag, CdkDragHandle } from '@angular/cdk/drag-drop';
 import { DialogRef, DIALOG_DATA } from '@angular/cdk/dialog';
 import { form, FormField } from '@angular/forms/signals';
 
+import type { UsbDeviceInfo } from '../../../electron/preload';
+
 import * as gIF from '../gIF';
 
 interface usb_t {
@@ -87,7 +89,7 @@ export class SelUSB implements OnInit {
 
     ngOnInit(): void {
 
-        const dlgList: Electron.USBDevice[] = this.dlgData.devices ?? [];
+        const dlgList: UsbDeviceInfo[] = this.dlgData.devices ?? [];
 
         const devs: usb_t[] = dlgList.map((dev) => ({
             id: dev.deviceId,

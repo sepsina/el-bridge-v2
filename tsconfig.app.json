@@ -9,6 +9,7 @@
     "include": [
         "src/main.ts",
         "src/app/**/*.ts",
-        "src/global.d.ts"
+        "src/global.d.ts",
+        "electron/**/*.ts"
     ]
 }

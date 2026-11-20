@@ -1,5 +1,4 @@
-<div class="col-top-strech"
-     cdkDrag
+<div cdkDrag
      cdkDragRootElement="#logs-dlg"
      cdkDragBoundary=".cdk-overlay-container">
 
@@ -11,8 +10,8 @@
             <i class="fa fa-times"></i>
         </button>
     </div>
-    <div class="col-top-strech dlg-body">
-        <div class="col-top-strech cards-common">
+    <div class="dlg-body">
+        <div class="cards-common">
             <div class="row-right">
                 <label>autoscroll:</label>
                 <input
@@ -22,7 +21,7 @@
                     (click)="autoScrollChange()">
             </div>
 
-            <div class="col-top-strech" id="logList" #logList>
+            <div id="logList" #logList>
                 @for(msg of utils.msgLogs(); track $index){
                     <div class="log-msg" [style.color]="msg.color">
                         {{ msg.text }}

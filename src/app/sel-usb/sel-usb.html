@@ -1,5 +1,4 @@
-<div class="col-top-strech"
-     cdkDrag
+<div cdkDrag
      cdkDragRootElement="#get-usb-dlg"
      cdkDragBoundary=".cdk-overlay-container">
 
@@ -10,17 +9,27 @@
         </button>
     </div>
 
-    <div class="col-top-strech dlg-body">
-            <div class="row-center">
+    <div class="dlg-body">
+            <!-- <div class="row-center">
                 <label for="usbDeviceSelect">device:</label>
                 <select id="usbDeviceSelect" [formField]="usbForm.selectedDeviceIndex">
                     @for(usb of usbList(); track usb.id; let i = $index) {
                         <option [value]="i">{{ usb.name }}</option>
                     }
                 </select>
+            </div> -->
+            <div class="usb-list" role="radiogroup" aria-label="USB device">
+                @for(usb of usbList(); track usb.id; let i = $index) {
+                    <label class="usb-item">
+                        <input type="radio"
+                               [value]="i.toString()"
+                               [formField]="usbForm.selectedDeviceIndex">
+                        <span>{{ usb.name }}</span>
+                    </label>
+                }
             </div>
 
-            <div class="col-top-strech part-desc">
+            <div class="part-desc">
                 @for(desc of usb_desc(); track desc.key) {
                     <div>
                         <span class="desc-label">{{ desc.key }}</span>

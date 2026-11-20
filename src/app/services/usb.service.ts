@@ -1,6 +1,5 @@
-import { Injectable, Service, effect, inject, signal} from '@angular/core';
+import { Service, inject, signal, computed, effect, untracked, OnDestroy } from '@angular/core';
 import { StorageService } from './storage.service';
-//import { webusb } from 'usb';
 import { UtilsService } from './utils.service';
 
 import * as gConst from '../gConst';
@@ -12,122 +11,215 @@ const options: USBDeviceRequestOptions = {
     filters: [{vendorId: vID/*, productId: pID*/}]
 };
 
+const READ_POLL_MS = 100;     // normal polling interval
+const READ_BACKOFF_MS = 1000; // delay after an error or unexpected status
+const HIST_MIN_INTERVAL_S = 9; // minimum seconds between history samples
+
 @Service()
-export class UsbService {
+export class UsbService implements OnDestroy {
 
-    private usb_device?: USBDevice;
-    valid_dev_flag = signal(false);
+    // single source of truth: the device handle drives the derived state
+    private usb_device = signal<USBDevice | undefined>(undefined);
+    readonly valid_dev_flag = computed(() => this.usb_device() !== undefined);
+    readonly deviceName = computed(() => this.usb_device()?.productName || '');
 
-    rxBuf = new Uint8Array(1024);
+    //rxBuf = new Uint8Array(1024);
     txBuf = new Uint8Array(1024);
     rwBuf = new gIF.rwBuf_t();
 
     outFrames: Uint8Array[] = [];
 
     private isReading = false;
-    usbReadTmo: any;
+    private readGen = 0;
+    private destroyed = false;
+    private txFailCount = 0;
+
+    private sending = false;
+    private closing = false;
+    private connecting = false;
+
+    private usbReadTmo: ReturnType<typeof setTimeout> | undefined;
+    private sendTmo: ReturnType<typeof setTimeout> | undefined;
+    private cleanTmo: ReturnType<typeof setTimeout> | undefined;
 
     storage = inject(StorageService);
     utils = inject(UtilsService);
 
-    trash = 0;
-
     constructor() {
-        setTimeout(() => {
-            this.sendFrame();
-        }, 100);
 
         this.rwBuf.wrBuf = new DataView(this.txBuf.buffer);
 
-        navigator.usb.ondisconnect = (event: USBConnectionEvent)=>{
-            console.warn(event);
-            this.storage.itemMap.update((map)=>{
-                for(let [, val] of map) {
-                    val.isValid = false;
-                }
-                return new Map(map);
-            });
-            this.valid_dev_flag.set(false);
+        navigator.usb.addEventListener('disconnect', this.onDisconnect);
+        window.addEventListener('beforeunload', this.onUnload);
 
-            const msg = `device disconnected -> ${event.device.productName}`;
-            this.utils.sendMsg(msg, 'red');
-        };
+        effect(() => {
+            const dev = this.usb_device();
+            untracked(() => {
+                if(this.usbReadTmo) {
+                    clearTimeout(this.usbReadTmo);
+                    this.usbReadTmo = undefined;
+                }
+                if(this.sendTmo) {
+                    clearTimeout(this.sendTmo);
+                    this.sendTmo = undefined;
+                }
+                this.outFrames.length = 0;
+                this.txFailCount = 0;
+                this.isReading = false;
+                this.sending = false;
+
+                if(dev && !this.destroyed) {
+                    this.usbReadTmo = setTimeout(() => void this.usbRead(), READ_POLL_MS);
+                }
+            });
+        });
     }
 
     /***********************************************************************************************
      * fn          initApp
-     *
-     * brief
      *
      */
     initApp() {
 
         this.storage.readAllKeys();
 
-        setTimeout(()=>{
+        if(this.cleanTmo) {
+            clearTimeout(this.cleanTmo);
+        }
+        this.cleanTmo = setTimeout(() => {
             this.cleanAgedItems();
         }, 60000);
     }
 
     /***********************************************************************************************
-     * fn          request_device
+     * fn          onUnload
+     *
+     */
+    private onUnload = () => {
+        this.usb_device()?.close().catch(() => {});
+    };
+
+    /***********************************************************************************************
+     * fn          ngOnDestroy
+     *
+     */
+    ngOnDestroy() {
+
+        this.destroyed = true;
+        this.readGen++;
+
+        navigator.usb.removeEventListener('disconnect', this.onDisconnect);
+        window.removeEventListener('beforeunload', this.onUnload);
+
+        clearTimeout(this.sendTmo);
+        clearTimeout(this.cleanTmo);
+        clearTimeout(this.usbReadTmo);
+
+        this.usb_device()?.close().catch(() => {});
+    }
+
+    /***********************************************************************************************
+     * fn          onDisconnect
+     *
+     */
+    private onDisconnect = (event: USBConnectionEvent) => {
+
+        if(event.device !== this.usb_device()) {
+            return;
+        }
+
+        this.readGen++; // invalidate in-flight reads
+        this.invalidateItems();
+        this.usb_device.set(undefined); // effect resets timers/buffers; valid_dev_flag follows
+
+        // release the stale handle; the device is already gone, so ignore errors
+        if(event.device.opened) {
+            event.device.close().catch(() => {});
+        }
+
+        const msg = `USB device disconnected: ${event.device.productName}`;
+        this.utils.sendMsg(msg, 'red');
+    };
+
+    /***********************************************************************************************
+     * fn          pickDevice
+     *
+     * brief       show the device picker, returns undefined on cancel or failure
+     *
+     */
+    private async pickDevice(): Promise<USBDevice | undefined> {
+
+        try {
+            return await navigator.usb.requestDevice(options);
+        }
+        catch(err: unknown) {
+            if(err instanceof DOMException && err.name === 'NotFoundError') {
+                console.log('User cancelled the device selection prompt.');
+            }
+            else {
+                console.error('Failed to request USB device:', err);
+                this.utils.sendMsg('Failed to connect USB device', 'red');
+            }
+            return undefined;
+        }
+    }
+
+    /***********************************************************************************************
+     * fn          requestDevice
      *
      * brief
      *
      */
     async requestDevice() {
 
-        try {
-            // 1. Clean up any existing stale timer before connecting a new device
-            if(this.usbReadTmo) {
-                clearTimeout(this.usbReadTmo);
-                this.usbReadTmo = undefined;
-            }
-
-            // 2. Request the device via WebUSB
-            const device = await navigator.usb.requestDevice({ filters: [{ vendorId: vID }] });
-
-            // 3. Ensure clean connection state
-            if(!device.opened) {
-                await device.open();
-            }
-
-            if(device.configuration === null) {
-                await device.selectConfiguration(1);
-            }
-
-            // Check if interface 0 is already claimed, claim if not
-            // (WebUSB doesn't have a direct 'isClaimed' property, so we handle it cleanly)
-            try {
-                await device.claimInterface(0);
-            }
-            catch(claimErr) {
-                console.warn('Interface 0 might already be claimed:', claimErr);
-            }
-
-            // 4. Assign device and update state signals
-            this.usb_device = device;
-            this.valid_dev_flag.set(true);
-
-            const msg = `Device connected -> ${device.productName || 'Unknown Device'}`;
-            this.utils.sendMsg(msg, 'green'); // Changed to 'green' or success color
-
-            // 5. Start the read loop
-            this.usbReadTmo = setTimeout(() => {
-                this.usbRead();
-            }, 100);
-
+        if(this.connecting) {
+            return;
         }
-        catch(err: any) {
-            if(err.name === 'NotFoundError') {
-                console.log('User cancelled the device selection prompt.');
+        this.connecting = true;
+
+        try {
+            if(this.valid_dev_flag()) {
+                await this.closeDevice();
             }
-            else {
-                console.error('Failed to request/connect USB device:', err);
+
+            const device = await this.pickDevice();
+            if(!device) {
+                return; // cancelled or failed, finally resets connecting
+            }
+
+            try {
+                if(!device.opened) {
+                    await device.open();
+                }
+                if(device.configuration === null) {
+                    await device.selectConfiguration(1);
+                }
+                const iface = device.configuration?.interfaces.find(i => i.interfaceNumber === 0);
+                if(!iface) {
+                    throw new Error('USB interface 0 not found on device');
+                }
+                if(!iface.claimed) {
+                    await device.claimInterface(0);
+                }
+                if(!device.opened) {
+                    throw new Error('USB device disconnected during setup');
+                }
+                this.readGen++;
+                this.isReading = false;
+                this.usb_device.set(device);
+
+                this.utils.sendMsg(`Device connected -> ${device.productName || 'Unknown Device'}`, 'green');
+            }
+            catch(err: unknown) {
+                if(device.opened) {
+                    await device.close().catch(() => {});
+                }
+                console.error('Failed to set up USB device:', err);
                 this.utils.sendMsg('Failed to connect USB device', 'red');
             }
-
-            this.valid_dev_flag.set(false);
+        }
+        finally {
+            this.connecting = false;
         }
     }
 
@@ -139,42 +231,67 @@ export class UsbService {
      */
     async closeDevice() {
 
-        // 1. Immediately stop any pending read loops or timers
+        const dev = this.usb_device();
+
+        if(!dev || this.closing) {
+            return;
+        }
+        this.closing = true;
+        this.readGen++; // invalidate in-flight reads
+
         if(this.usbReadTmo) {
             clearTimeout(this.usbReadTmo);
             this.usbReadTmo = undefined;
         }
+        this.invalidateItems();
 
-        // 2. Mark all items as invalid in the storage map
-        this.storage.itemMap.update((map) => {
-            for(const [, val] of map) {
-                val.isValid = false;
-            }
-            return new Map(map);
-        });
+        const productName = dev.productName || 'Unknown Device';
+        let closed = false;
+        let closeFailed = false;
 
-        // 3. Close the USB device if active
-        if(this.valid_dev_flag() && this.usb_device) {
-            this.valid_dev_flag.set(false);
-
-            // Cache the name before closing the connection
-            const productName = this.usb_device.productName || 'Unknown Device';
-
-            try {
-                if(this.usb_device.opened) {
-                    await this.usb_device.releaseInterface(0);
-                    await this.usb_device.close();
+        try {
+            if(dev.opened) {
+                try {
+                    await dev.releaseInterface(0);
+                }
+                catch(err) {
+                    console.warn('releaseInterface failed:', err);
+                }
+                try {
+                    await dev.close();
+                }
+                catch(err) {
+                    if(err instanceof DOMException && err.name === 'NotFoundError') {
+                        // device unplugged during close: effectively closed
+                        console.warn('close: device already gone');
+                    }
+                    else {
+                        console.warn('close failed, retrying once:', err);
+                        await dev.close(); // throws to outer catch if it fails again
+                    }
                 }
             }
-            catch (err) {
-                console.error('Error during USB device closure:', err);
+            closed = true;
+        }
+        catch (err) {
+            closeFailed = true;
+            console.error('Error during USB device closure:', err);
+        }
+        finally {
+            this.closing = false;
+            if(this.usb_device() === dev) {
+                this.usb_device.set(undefined);
             }
-            finally {
-                this.usb_device = undefined; // Clear the stale device reference
+            else {
+                closed = false; // already handled by onDisconnect
+                closeFailed = false;
             }
-
-            // Use a neutral/status color (e.g., 'orange' or 'info') instead of 'red' for a normal close
+        }
+        if(closed) {
             this.utils.sendMsg(`Device closed -> ${productName}`, 'orange');
+        }
+        else if(closeFailed) {
+            this.utils.sendMsg(`Failed to close device -> ${productName}. Unplug and reconnect it.`, 'red');
         }
     }
 
@@ -186,31 +303,80 @@ export class UsbService {
      */
     async usbRead() {
 
-        if(this.isReading || !this.valid_dev_flag() || !this.usb_device) {
-            this.scheduleNextRead(1000);
+        const dev = this.usb_device();
+
+        if(!dev || this.closing || this.isReading){
             return;
         }
 
         this.isReading = true;
-        let tmo = 100;
+        const gen = this.readGen;
+        let tmo = READ_POLL_MS;
 
         try {
-            const usbMsg = await this.usb_device.transferIn(1, 64);
+            // Request a 64-byte read from endpoint 1
+            const usbMsg = await dev.transferIn(1, 64);
 
-            if(usbMsg.status === 'ok') {
-                this.processMsg(usbMsg);
-            }
-            else {
-                tmo = 1000; // Back off on non-ok status
+            if(gen === this.readGen) {
+                switch(usbMsg.status) {
+                    case 'ok':
+                        this.processMsg(usbMsg);
+                        break;
+
+                    case 'stall': {
+                        console.warn('USB read stalled, clearing halt');
+                        let cleared = true;
+                        await dev.clearHalt('in', 1).catch((haltErr: unknown) => {
+                            cleared = false;
+                            console.warn('clearHalt failed:', haltErr);
+                        });
+                        // clearHalt is async: the device may have changed meanwhile
+                        if(gen === this.readGen) {
+                            tmo = cleared ? READ_POLL_MS : READ_BACKOFF_MS;
+                        }
+                        break;
+                    }
+
+                    case 'babble':
+                        console.warn('USB read babble: device sent more data than requested');
+                        tmo = READ_BACKOFF_MS;
+                        break;
+
+                    default:
+                        console.warn(`USB read unexpected status: ${String(usbMsg.status)}`);
+                        tmo = READ_BACKOFF_MS; // Back off on unknown status
+                        break;
+                }
             }
         }
-        catch(err: any) {
-            console.error('USB Read Error:', err);
-            tmo = 1000; // Back off on error
+        catch(err: unknown) {
+            if(gen === this.readGen) {
+                if(err instanceof DOMException) {
+                    switch(err.name) {
+                        case 'NotFoundError':
+                        case 'NetworkError':
+                        case 'InvalidStateError':
+                            console.warn(`USB read failed (${err.name}):`, err.message);
+                            void this.closeDevice();
+                            break;
+                        case 'AbortError':
+                            break; // read aborted by close, nothing to do
+                        default:
+                            console.error('USB read error:', err);
+                            break;
+                    }
+                }
+                else {
+                    console.error('Unexpected USB read error:', err);
+                }
+            }
+            tmo = READ_BACKOFF_MS; // Back off on error
         }
         finally {
-            this.isReading = false;
-            this.scheduleNextRead(tmo);
+            if(gen === this.readGen) {
+                this.isReading = false;
+                this.scheduleNextRead(tmo);
+            }
         }
     }
 
@@ -222,9 +388,110 @@ export class UsbService {
 
         if(this.usbReadTmo) {
             clearTimeout(this.usbReadTmo);
+            this.usbReadTmo = undefined;
         }
-        this.usbReadTmo = setTimeout(() => this.usbRead(), delay);
-}
+        if(this.valid_dev_flag()){
+            if(!this.destroyed){
+                this.usbReadTmo = setTimeout(() => void this.usbRead(), delay);
+            }
+        }
+    }
+
+    /***********************************************************************************************
+     * fn          addOutFrame
+     *
+     * brief
+     *
+     */
+    addOutFrame(frame: Uint8Array) {
+
+        if(!this.usb_device() || this.destroyed) {
+            return; // no device: drop the frame
+        }
+
+        this.outFrames.push(frame);
+        this.kickSend();
+    }
+
+    /***********************************************************************************************
+     * fn          kickSend
+     *
+     * brief       start the send loop if it is not already running
+     *
+     */
+    private kickSend() {
+
+        if(this.sending || this.sendTmo) {
+            return;
+        }
+
+        this.sendTmo = setTimeout(() => {
+            this.sendTmo = undefined;
+            void this.sendFrame();
+        }, 0);
+    }
+
+    /***********************************************************************************************
+     * fn          sendFrame
+     *
+     * brief
+     *
+     */
+    async sendFrame() {
+
+        const dev = this.usb_device();
+
+        if(!dev || this.destroyed || this.closing || this.sending || !this.outFrames.length) {
+            return;
+        }
+        this.sending = true;
+
+        const frame = this.outFrames[0];
+        try {
+            const res = await dev.transferOut(1, frame as BufferSource);
+            if(res.status !== 'ok') {
+                throw new Error(`transferOut status: ${res.status}`);
+            }
+            if(this.usb_device() === dev) {
+                if(this.outFrames[0] === frame) {
+                    this.outFrames.shift();
+                }
+                this.txFailCount = 0;
+            }
+        }
+        catch(err) {
+            console.error(err);
+            if(this.usb_device() === dev) {
+                if(err instanceof DOMException &&
+                   (err.name === 'NotFoundError' || err.name === 'NetworkError')) {
+                    // device is gone: stop retrying and close
+                    void this.closeDevice();
+                }
+                else if(++this.txFailCount >= 3) {
+                    this.outFrames.shift();
+                    this.txFailCount = 0;
+                    this.utils.sendMsg('USB frame dropped after 3 failed attempts', 'red');
+                }
+            }
+        }
+        finally {
+            if(this.usb_device() === dev) {
+                this.sending = false;
+            }
+        }
+
+        // continue only while frames remain (retry delay on failure)
+         if(!this.destroyed){
+            if(this.usb_device() === dev){
+                if(this.outFrames.length){
+                    this.sendTmo = setTimeout(() => {
+                        this.sendTmo = undefined;
+                        void this.sendFrame();
+                    }, this.txFailCount ? 100 : 0);
+                }
+            }
+        }
+    }
 
     /***********************************************************************************************
      * fn          processMsg
@@ -234,28 +501,37 @@ export class UsbService {
      */
     processMsg(usbMsg: USBInTransferResult) {
 
-        this.rwBuf.rdBuf = usbMsg.data!;
-        this.rwBuf.rdIdx = 0;
+        if(!usbMsg.data) {
+            return;
+        }
 
-        const msgType = this.rwBuf.read_uint8();
-        switch(msgType){
-            case gConst.USB_MSG_ITEM_REPORT: {
-                const devRep: gIF.deviceReport_t = {
-                    hops: Array.from({ length: gConst.HOPS_MAX }, () => this.rwBuf.read_uint8()),
-                    partNum: this.rwBuf.read_uint16_LE(),
-                    addr: this.rwBuf.read_uint8(),
-                    data: (() => {
-                        const dataLen = this.rwBuf.read_uint8();
-                        return Array.from({ length: dataLen }, () => this.rwBuf.read_uint8());
-                    })()
-                };
+        try {
+            this.rwBuf.rdBuf = usbMsg.data;
+            this.rwBuf.rdIdx = 0;
 
-                this.parseDeviceReport(devRep);
+            const msgType = this.rwBuf.read_uint8();
+            switch(msgType){
+                case gConst.USB_MSG_ITEM_REPORT: {
+                    const devRep: gIF.deviceReport_t = {
+                        hops: Array.from({ length: gConst.HOPS_MAX }, () => this.rwBuf.read_uint8()),
+                        partNum: this.rwBuf.read_uint16_LE(),
+                        addr: this.rwBuf.read_uint8(),
+                        data: (() => {
+                            const dataLen = this.rwBuf.read_uint8();
+                            return Array.from({ length: dataLen }, () => this.rwBuf.read_uint8());
+                        })()
+                    };
 
-                const msg = `report -> partNum: ${this.partNumToName(devRep.partNum)}, addr: ${devRep.addr}`;
-                this.utils.sendMsg(msg, 'blue', 7);
+                    this.parseDeviceReport(devRep);
+
+                    const msg = `report -> partNum: ${this.partNumToName(devRep.partNum)}, addr: ${devRep.addr}`;
+                    this.utils.sendMsg(msg, 'blue', 7);
+                }
+                break;
             }
-            break;
+        }
+        catch(err) {
+            console.error('Malformed USB message:', err);
         }
     }
 
@@ -287,6 +563,8 @@ export class UsbService {
             if(mapItem) {
                 const updatedItem: gIF.netItem_t = {
                     ...mapItem,
+                    timestamps: [...mapItem.timestamps],
+                    vals: [...mapItem.vals],
                     frame_rnd: props.frame_rnd,
                     timestamp: now,
                     isValid: true,
@@ -356,7 +634,6 @@ export class UsbService {
         const frameValid = this.check_frame(devRep, ep, rnd);
 
         if(frameValid == false) {
-            console.log(`frame already processed`);
             return props;
         }
 
@@ -372,8 +649,8 @@ export class UsbService {
                 const rh_adc = this.rwBuf.read_uint16_LE();
                 const battery = this.readBattery();
 
-                const { temp, t_corr, units, t_unit } = this.processTemperature(devRep, ep, t_adc);
-                const { rh, rh_corr } = this.processHumidity(devRep, rh_ep, rh_adc);
+                const { t_C, t_corr, units, t_unit } = this.calcTemperature(devRep, ep, t_adc);
+                const rh = this.calcHumidity(rh_adc);
 
                 props.push({
                     valid: true,
@@ -385,7 +662,7 @@ export class UsbService {
                     hasHistory: true,
                     formatedVal: `${t_corr.toFixed(1)} ${t_unit}`,
                     units: units,
-                    value: temp,
+                    value: t_C,
                     battery: battery
                 });
 
@@ -397,7 +674,7 @@ export class UsbService {
                     group: gIF.eGroup_t.E_GROUP_HUMIDITY,
                     type: gIF.eType_t.E_TYPE_SENSOR,
                     hasHistory: true,
-                    formatedVal: `${rh_corr.toFixed(0)} %rh`,
+                    formatedVal: `${rh.toFixed(0)} %rh`,
                     units: gConst.RH_UNIT,
                     value: rh,
                     battery: battery
@@ -487,7 +764,7 @@ export class UsbService {
             }
 
             default: {
-                console.log(`unsuported part: ${devRep.partNum}`);
+                console.log(`unsupported part: ${devRep.partNum}`);
                 break;
             }
         }
@@ -515,14 +792,14 @@ export class UsbService {
     }
 
     /***********************************************************************************************
-     * fn          processTemperature
+     * fn          calcTemperature
+     *
+     * brief       convert SHT40 ADC value to degrees C and the user selected unit (no offset applied)
      *
      */
-    private processTemperature(devRep: gIF.deviceReport_t, ep: number, t_adc: number) {
+    private calcTemperature(devRep: gIF.deviceReport_t, ep: number, t_adc: number) {
 
-        const temp = parseFloat((-45.0 + (175.0 * t_adc) / 65535.0).toFixed(1));
-        let t_corr = temp;
-        let units = gConst.DEG_C;
+        const t_C = parseFloat((-45.0 + (175.0 * t_adc) / 65535.0).toFixed(1));
 
         const key = this.storage.itemKey({
             partNum: devRep.partNum,
@@ -530,38 +807,24 @@ export class UsbService {
             endPoint: ep
         });
 
-        const nvProps = this.storage.nvPropsMap.get(key);
-            if(nvProps) {
-                units = nvProps.valCorr.units;
-                t_corr = this.corrVal(temp, nvProps.valCorr);
-            }
+        const units = this.storage.nvPropsMap.get(key)?.valCorr.units ?? gConst.DEG_C;
+        const isF = units === gConst.DEG_F;
 
-            const t_unit = units === gConst.DEG_F ? '°F' : '°C';
+        const t_corr = isF ? (t_C * 9.0) / 5.0 + 32.0 : t_C;
+        const t_unit = isF ? '°F' : '°C';
 
-            return { temp, t_corr, units, t_unit };
+        return { t_C, t_corr, units, t_unit };
     }
 
     /***********************************************************************************************
-     * fn          processHumidity
+     * fn          calcHumidity
      *
      */
-    private processHumidity(devRep: gIF.deviceReport_t, rh_ep: number, rh_adc: number) {
+    private calcHumidity(rh_adc: number) {
 
         const rh = parseFloat((-6.0 + (125.0 * rh_adc) / 65535.0).toFixed(0));
-        let rh_corr = rh;
 
-        const key = this.storage.itemKey({
-            partNum: devRep.partNum,
-            addr: devRep.addr,
-            endPoint: rh_ep
-        });
-
-        const nvProps = this.storage.nvPropsMap.get(key);
-        if(nvProps) {
-            rh_corr = this.corrVal(rh, nvProps.valCorr);
-        }
-
-        return { rh, rh_corr };
+        return rh;
     }
 
     /***********************************************************************************************
@@ -571,6 +834,9 @@ export class UsbService {
     private readBattery(): gIF.battery_t {
 
         const rep_size = this.rwBuf.read_uint8();
+        if(rep_size === gIF.eBattRepSize.E_BATT_REP_SIZE_ZERO) {
+            return { rep_size, v_bat: undefined };
+        }
         const battery: gIF.battery_t = {
             rep_size,
             v_bat: this.rwBuf.read_uint16_LE()
@@ -590,25 +856,6 @@ export class UsbService {
     }
 
     /***********************************************************************************************
-     * fn          corrVal
-     *
-     * brief
-     *
-     */
-    private corrVal(val: number, corr: gIF.valCorr_t) {
-
-        let corrVal = val + corr.offset;
-
-        switch(corr.units) {
-            case gConst.DEG_F: {
-                corrVal = (corrVal * 9.0) / 5.0 + 32.0;
-                break;
-            }
-        }
-        return corrVal;
-    }
-
-     /***********************************************************************************************
      * fn          dataHistory
      *
      * brief
@@ -619,25 +866,24 @@ export class UsbService {
                         item: gIF.netItem_t,
                         batchArray: gIF.netItem_t[]) {
 
-        const timestamps = item.timestamps;
+        const { timestamps, vals } = item;
         const len = timestamps.length;
 
-        // Check if we need to filter by time difference (only if items already exist)
-        if(len > 0 && (timestamp - timestamps[len - 1]) <= 59) {
-            return; // Skip if interval is too short
+        // skip if the last sample is too recent
+        if(len > 0 && (timestamp - timestamps[len - 1]) <= HIST_MIN_INTERVAL_S) {
+            return;
         }
 
-        // Insert new data points
         timestamps.push(timestamp);
-        item.vals.push(val);
+        vals.push(val);
 
-        // Maintain maximum history length
-        if(timestamps.length > gConst.HIST_LEN) {
-            timestamps.shift();
-            item.vals.shift();
+        // drop the oldest samples in one step if the history is too long
+        const excess = timestamps.length - gConst.HIST_LEN;
+        if(excess > 0) {
+            timestamps.splice(0, excess);
+            vals.splice(0, excess);
         }
 
-        // Queue for batch processing
         batchArray.push(item);
     }
 
@@ -649,6 +895,10 @@ export class UsbService {
      */
     private cleanAgedItems() {
 
+        if(this.destroyed) {
+            return;
+        }
+
         const now = Math.floor(Date.now() / 1000);
         const keysToDelete: string[] = [];
         const keysToInvalidate: string[] = [];
@@ -657,7 +907,7 @@ export class UsbService {
             const diff = now - val.timestamp;
             if(diff > gConst.ITEM_TTL) {
                 keysToDelete.push(key);
-                window.electronItemStore.delete(key);
+                window.electronItemStore?.delete(key);
                 this.storage.nvPropsMap.delete(key);
             }
             else if(diff > gConst.ITEM_VALID_TTL && val.isValid) {
@@ -683,40 +933,7 @@ export class UsbService {
             });
         }
 
-        setTimeout(() => this.cleanAgedItems(), 60000);
-    }
-
-    /***********************************************************************************************
-     * fn          addOutFrame
-     *
-     * brief
-     *
-     */
-    addOutFrame(frame: Uint8Array) {
-        this.outFrames.push(frame);
-    }
-
-    /***********************************************************************************************
-     * fn          sendFrame
-     *
-     * brief
-     *
-     */
-    async sendFrame() {
-
-        if(this.outFrames.length && this.valid_dev_flag()){
-            try {
-                const frame = this.outFrames.shift()!;
-                const res = await this.usb_device?.transferOut(1, frame as BufferSource);
-                console.log(res);
-            }
-            catch(err) {
-                console.error(err);
-            }
-        }
-        setTimeout(() => {
-            this.sendFrame();
-        }, 100);
+        this.cleanTmo = setTimeout(() => this.cleanAgedItems(), 60000);
     }
 
 
@@ -728,5 +945,19 @@ export class UsbService {
      */
     partNumToName(partNum: number): string {
         return gConst.PART_NAMES[partNum] ?? 'unknown';
+    }
+
+        /***********************************************************************************************
+     * fn          invalidateItems
+     *
+     */
+    private invalidateItems() {
+        this.storage.itemMap.update((map) => {
+            const newMap = new Map(map);
+            for(const [key, val] of newMap) {
+                newMap.set(key, { ...val, isValid: false });
+            }
+            return newMap;
+        });
     }
 }

@@ -1,11 +1,19 @@
 import {
     contextBridge,
     ipcRenderer,
-    IpcRendererEvent,
-    USBDevice
+    IpcRendererEvent
  } from 'electron';
 
-import { UdpPkt} from './configUDP'
+import type { UdpPkt} from './configUDP'
+
+export interface UsbDeviceInfo {
+    deviceId: string;
+    vendorId: number;
+    productId: number;
+    productName: string;
+    manufacturerName: string;
+    serialNumber?: string;
+}
 
 // generic interface for the store API
 interface StoreApi {
@@ -16,13 +24,13 @@ interface StoreApi {
     getAll(): Promise<Record<string, string>>;
     getKeys(): Promise<string[]>;
     getValues(): Promise<string[]>;
-    getSize?(): Promise<number>; // Optional if not all stores have it
+    getSize(): Promise<number>;
 }
 
 // File system API
 const fsApi = {
-    selectAndSaveBg: () => ipcRenderer.invoke('select-and-save-bg'),
-    getSavedBg: () => ipcRenderer.invoke('get-saved-bg')
+    selectAndSaveBg: (): Promise<string | null> => ipcRenderer.invoke('select-and-save-bg'),
+    getSavedBg: (): Promise<string | null> => ipcRenderer.invoke('get-saved-bg')
 };
 
 // factory function to eliminate duplication
@@ -34,13 +42,14 @@ const createStoreApi = (prefix: string): StoreApi => ({
     getAll: () => ipcRenderer.invoke(`${prefix}-get-all`),
     getKeys: () => ipcRenderer.invoke(`${prefix}-get-keys`),
     getValues: () => ipcRenderer.invoke(`${prefix}-get-values`),
+    getSize: () => ipcRenderer.invoke(`${prefix}-get-size`),
 });
 
 // USB
 const usbApi = {
-    onUsbDevicesAvailable: (callback: (devices: USBDevice[]) => void): (() => void) => {
-        const listener = (_event: IpcRendererEvent, devices: USBDevice[]) => {
-            callback(devices);
+    onUsbDevicesAvailable: (callback: (devices: UsbDeviceInfo[]) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, devices: UsbDeviceInfo[]) => {
+            callback(Array.isArray(devices) ? devices : []);
         };
         ipcRenderer.on('usb-devices-available', listener);
         return (): void => {
@@ -75,28 +84,22 @@ const udpApi = {
 };
 
 // Item store
-const itemStoreApi = {
-    ...createStoreApi('item-store'),
-    getSize: (): Promise<number> => ipcRenderer.invoke('item-store-get-size'),
-};
+const itemStoreApi = createStoreApi('item-store');
 
 // Stat store
-const statStoreApi = {
-    ...createStoreApi('stat-store'),
-    getSize: (): Promise<number> => ipcRenderer.invoke('stat-store-get-size'),
-};
+const statStoreApi = createStoreApi('stat-store');
 
 // export types so the frontend can read it
 export type ElectronUSB = typeof usbApi;
 export type ElectronUDP = typeof udpApi;
 export type ElectronStatStore = typeof statStoreApi;
 export type ElectronItemStore = typeof itemStoreApi;
-export type ElectronFs = typeof fsApi;
+export type ElectronFS = typeof fsApi;
 
 // Publish API
 contextBridge.exposeInMainWorld('electronUSB', usbApi);
 contextBridge.exposeInMainWorld('electronUDP', udpApi);
 contextBridge.exposeInMainWorld('electronStatStore', statStoreApi);
 contextBridge.exposeInMainWorld('electronItemStore', itemStoreApi);
-contextBridge.exposeInMainWorld('electronFs', fsApi);
+contextBridge.exposeInMainWorld('electronFS', fsApi);
 

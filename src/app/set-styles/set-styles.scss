@@ -6,6 +6,16 @@
     background-color: white;
 }
 
+.dlg-body {
+    max-height: 60vh; /* Limit the height of the body */
+    overflow-y: scroll; /* Enable vertical scrolling if content exceeds max height */
+    scrollbar-width: none; /* Hide scrollbar (Chromium 121+, Firefox) */
+}
+
+.dlg-body::-webkit-scrollbar {
+    display: none; /* Hide scrollbar in older Chromium/Electron versions */
+}
+
 #testCont {
     display: flex;
     flex-direction: column;

@@ -12,7 +12,7 @@ import {
     computed
 } from '@angular/core';
 import { DragDropModule, CdkDragEnd, CdkDragStart } from "@angular/cdk/drag-drop";
-import { HttpClient, httpResource } from '@angular/common/http';
+import { httpResource } from '@angular/common/http';
 import { ResizeObserverDirective } from './directives/resize-observer.directive';
 import { Dialog, DialogModule } from '@angular/cdk/dialog';
 import { OverlayModule } from '@angular/cdk/overlay';
@@ -22,6 +22,8 @@ import { CommonModule } from '@angular/common';
 import { StorageService } from './services/storage.service';
 import { UtilsService } from './services/utils.service';
 import { UsbService } from './services/usb.service';
+
+import type { UsbDeviceInfo } from '../../electron/preload';
 
 import * as gConst from './gConst';
 import * as gIF from './gIF';
@@ -86,11 +88,12 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
 
     trash = 1;
 
+    capTmo: ReturnType<typeof setTimeout> | null = null;
     footerTmo: ReturnType<typeof setTimeout> | null = null;
     footerStatus = signal('');
 
-    strIdx = 0;
-    usbStatus = signal('usb not connected');
+    //strIdx = 0;
+    //usbStatus = signal('usb not connected');
 
     private removeUsbListener?: () => void;
 
@@ -137,7 +140,6 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     });
 
     storage = inject(StorageService);
-    httpClient = inject(HttpClient);
     utils = inject(UtilsService);
     usb = inject(UsbService);
     dialog = inject(Dialog);
@@ -176,7 +178,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
         await this.setBkgImg();
 
         //setTimeout(() => this.init(), 10);
-        setTimeout(() => this.capitalizeAtIndex(), 500);
+        //setTimeout(() => this.capitalizeAtIndex(), 500);
 
     }
 
@@ -206,6 +208,10 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      *
      */
     ngOnDestroy() {
+
+        if(this.capTmo) clearTimeout(this.capTmo);
+        if(this.footerTmo) clearTimeout(this.footerTmo);
+
         if(this.removeUsbListener){
             this.removeUsbListener();
         }
@@ -224,44 +230,18 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     };
 
     /***********************************************************************************************
-     * fn          init
-     *
-     * brief       Loads the floor plan background and sets the canvas dimensions
-     *
-     */
-    init() {
-
-        const bkgImgPath = './assets/floor_plan.jpg';
-        const bkgImg = new Image();
-
-        bkgImg.onload = () => {
-            this.bkgImgWidth.set(bkgImg.naturalWidth);
-            this.bkgImgHeight.set(bkgImg.naturalHeight);
-            this.bkgImgUrl.set(`url(${bkgImgPath})`);
-
-            const container = this.floorPlanRef().nativeElement as HTMLElement;
-            this.imgWidth.set(container.getBoundingClientRect().width);
-        };
-
-        bkgImg.onerror = () => {
-            console.error(`Failed to load floor plan image: ${bkgImgPath}`);
-        };
-
-        bkgImg.src = bkgImgPath;
-    }
-
-    /***********************************************************************************************
      * fn          setBkgImg
      *
      */
     async setBkgImg(): Promise<void> {
-        // 1. Check if a custom floor plan was previously saved in Electron
-        const savedDataUrl = await window.electronFs.getSavedBg();
 
-        // 2. Use the saved image if available, otherwise fall back to your default asset
+        // Check if a custom floor plan was previously saved in Electron
+        const savedDataUrl = await window.electronFS.getSavedBg();
+
+        // Use the saved image if available, otherwise fall back to your default asset
         const bkgImgSrc = savedDataUrl ?? this.defaultFloorPlan;
 
-        // 3. Load the image to measure dimensions and update signals
+        // Load the image to measure dimensions and update signals
         this.loadImageAndUpdateSignals(bkgImgSrc);
     }
 
@@ -293,13 +273,15 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      * fn          chooseBackground
      *
      */
-    async chooseBackground(): Promise<void> {
-
-        const newDataUrl = await window.electronFs.selectAndSaveBg();
-
-        if(newDataUrl) {
-            // Re-run dimension calculation and update signals with the new image
-            this.loadImageAndUpdateSignals(newDataUrl);
+     async chooseBackground(): Promise<void> {
+        try {
+            const newDataUrl = await window.electronFS.selectAndSaveBg();
+            if(newDataUrl) {
+                this.loadImageAndUpdateSignals(newDataUrl);
+            }
+        }
+        catch(err) {
+            console.error('Failed to select background:', err);
         }
     }
 
@@ -466,7 +448,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      * @brief
      *
      */
-    async getUSB(devs: Electron.USBDevice[]) {
+    async getUSB(devs: UsbDeviceInfo[]) {
 
         await this.usb.closeDevice();
 
@@ -615,10 +597,9 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      * brief
      *
      */
-    onResize(event: any) {
+    onResize(event: ResizeObserverEntry) {
 
-        const rect = event.contentRect;
-        this.imgWidth.set(rect.width);
+        this.imgWidth.set(event.contentRect.width);
     }
 
         /***********************************************************************************************
@@ -641,7 +622,9 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
                 break;
             case gConst.SHT40_018:
                 showBattery = true;
-                showCorr = true;
+                if(item.group === gIF.eGroup_t.E_GROUP_TEMPERATURE){
+                    showCorr = true;
+                }
                 break;
             case gConst.PB_023:
                 showBattery = true;
@@ -676,26 +659,45 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     /***********************************************************************************************
      * fn          mouseEnterAttr
      *
+     * brief       Shows item info in the footer for a few seconds
      */
     mouseEnterItem(keyVal: gIF.keyVal_t) {
 
-        const item = keyVal.value;
-        const partDesc: gIF.part_t = this.partMap.get(item.partNum) ?? { devName: 'unknown', part: 'unknown', url: '' };
+        const { name, partNum, group, type, addr } = keyVal.value;
 
-        this.footerStatus.set(`${item.name}: ${partDesc.part} -> ${partDesc.devName}`);
+        const groupNames: Partial<Record<gIF.eGroup_t, string>> = {
+            [gIF.eGroup_t.E_GROUP_TEMPERATURE]: 't',
+            [gIF.eGroup_t.E_GROUP_HUMIDITY]: 'rh',
+            [gIF.eGroup_t.E_GROUP_ON_OFF]: 'on/off'
+        };
+        const typeNames: Partial<Record<gIF.eType_t, string>> = {
+            [gIF.eType_t.E_TYPE_SENSOR]: 'sensor',
+            [gIF.eType_t.E_TYPE_ACTUATOR]: 'actuator',
+            [gIF.eType_t.E_TYPE_SWITCH]: 'switch'
+        };
 
-        clearTimeout(this.footerTmo ?? undefined);
+        const partName = gConst.PART_NAMES[partNum] ?? 'unknown';
+        const groupName = groupNames[group] ?? 'unknown';
+        const typeName = typeNames[type] ?? 'unknown';
+
+        this.footerStatus.set(`${name}: ${partName}/${groupName}-${typeName}@${addr}`);
+
+        if(this.footerTmo) clearTimeout(this.footerTmo);
         this.footerTmo = setTimeout(() => {
             this.footerStatus.set('');
+            this.footerTmo = null;
         }, 5000);
     }
 
     /***********************************************************************************************
-     * fn          mouseLeaveAttr
+     * fn          mouseLeaveItem
      *
      */
     mouseLeaveItem() {
-        if(this.footerTmo) clearTimeout(this.footerTmo);
+        if(this.footerTmo) {
+            clearTimeout(this.footerTmo);
+            this.footerTmo = null;
+        }
         this.footerStatus.set('');
     }
 
@@ -782,7 +784,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
      *
      * brief
      *
-     */
+     *
     capitalizeAtIndex() {
 
         if(this.usb.valid_dev_flag() === false) {
@@ -796,9 +798,9 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
                 );
             }
         }
-        setTimeout(() => this.capitalizeAtIndex(), 200);
+        this.capTmo = setTimeout(() => this.capitalizeAtIndex(), 200);
     }
-
+    */
     /***********************************************************************************************
      * @fn          moveSelectedItem
      * @brief       Shared logic for moving the selected item via keyboard or touch buttons
@@ -852,9 +854,12 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
     @HostListener('window:keydown', ['$event'])
     onKeyDown(event: KeyboardEvent) {
         const arrowKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
-        if(!arrowKeys.includes(event.key)) {
-            return;
-        }
+        if(!arrowKeys.includes(event.key)) return;
+
+        const target = event.target as HTMLElement | null;
+        if(target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+        if(!this.selectedItemState().selectedItem || !this.isDraggingEnabled()) return;
+
         event.preventDefault();
         this.moveSelectedItem(event.key as any, event.shiftKey);
     }
